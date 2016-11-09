@@ -38,7 +38,7 @@ DUK_LOCAL duk_uint8_t *duk__load_buffer_raw(duk_context *ctx, duk_uint8_t *p) {
 	duk_uint8_t *buf;
 
 	len = DUK_RAW_READ_U32_BE(p);
-	buf = (duk_uint8_t *) duk_push_fixed_buffer(ctx, (duk_size_t) len);
+	buf = (duk_uint8_t *) duk_push_fixed_buffer_nozero(ctx, (duk_size_t) len);
 	DUK_ASSERT(buf != NULL);
 	DUK_MEMCPY((void *) buf, (const void *) p, (size_t) len);
 	p += len;
@@ -417,8 +417,7 @@ static duk_uint8_t *duk__load_func(duk_context *ctx, duk_uint8_t *p, duk_uint8_t
 	 * duk_js_push_closure() quite carefully.
 	 */
 	duk_push_compiledfunction(ctx);
-	h_fun = duk_get_hcompfunc(ctx, -1);
-	DUK_ASSERT(h_fun != NULL);
+	h_fun = duk_known_hcompfunc(ctx, -1);
 	DUK_ASSERT(DUK_HOBJECT_IS_COMPFUNC((duk_hobject *) h_fun));
 	DUK_ASSERT(DUK_HCOMPFUNC_GET_DATA(thr->heap, h_fun) == NULL);
 	DUK_ASSERT(DUK_HCOMPFUNC_GET_FUNCS(thr->heap, h_fun) == NULL);
@@ -451,7 +450,7 @@ static duk_uint8_t *duk__load_func(duk_context *ctx, duk_uint8_t *p, duk_uint8_t
 	DUK_ASSERT(!DUK_HOBJECT_HAS_EXOTIC_ARGUMENTS(&h_fun->obj));
 
 	/* Create function 'data' buffer but don't attach it yet. */
-	fun_data = (duk_uint8_t *) duk_push_fixed_buffer(ctx, data_size);
+	fun_data = (duk_uint8_t *) duk_push_fixed_buffer_nozero(ctx, data_size);
 	DUK_ASSERT(fun_data != NULL);
 
 	/* Load bytecode instructions. */
@@ -515,8 +514,7 @@ static duk_uint8_t *duk__load_func(duk_context *ctx, duk_uint8_t *p, duk_uint8_t
 	 * them afterwards.
 	 */
 
-	h_data = (duk_hbuffer *) duk_get_hbuffer(ctx, idx_base + 1);
-	DUK_ASSERT(h_data != NULL);
+	h_data = (duk_hbuffer *) duk_known_hbuffer(ctx, idx_base + 1);
 	DUK_ASSERT(!DUK_HBUFFER_HAS_DYNAMIC(h_data));
 	DUK_HCOMPFUNC_SET_DATA(thr->heap, h_fun, h_data);
 	DUK_HBUFFER_INCREF(thr, h_data);

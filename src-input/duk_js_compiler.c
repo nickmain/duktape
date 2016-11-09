@@ -136,7 +136,6 @@ DUK_LOCAL_DECL void duk__emit_invalid(duk_compiler_ctx *comp_ctx);
 /* ivalue/ispec helpers */
 DUK_LOCAL_DECL void duk__copy_ispec(duk_compiler_ctx *comp_ctx, duk_ispec *src, duk_ispec *dst);
 DUK_LOCAL_DECL void duk__copy_ivalue(duk_compiler_ctx *comp_ctx, duk_ivalue *src, duk_ivalue *dst);
-DUK_LOCAL_DECL duk_bool_t duk__is_whole_get_int32(duk_double_t x, duk_int32_t *ival);
 DUK_LOCAL_DECL duk_reg_t duk__alloctemps(duk_compiler_ctx *comp_ctx, duk_small_int_t num);
 DUK_LOCAL_DECL duk_reg_t duk__alloctemp(duk_compiler_ctx *comp_ctx);
 DUK_LOCAL_DECL void duk__settemp_checkmax(duk_compiler_ctx *comp_ctx, duk_reg_t temp_next);
@@ -547,7 +546,7 @@ DUK_LOCAL void duk__init_func_valstack_slots(duk_compiler_ctx *comp_ctx) {
 
 	duk_push_dynamic_buffer(ctx, 0);
 	func->labelinfos_idx = entry_top + 5;
-	func->h_labelinfos = (duk_hbuffer_dynamic *) duk_get_hbuffer(ctx, entry_top + 5);
+	func->h_labelinfos = (duk_hbuffer_dynamic *) duk_known_hbuffer(ctx, entry_top + 5);
 	DUK_ASSERT(func->h_labelinfos != NULL);
 	DUK_ASSERT(DUK_HBUFFER_HAS_DYNAMIC(func->h_labelinfos) && !DUK_HBUFFER_HAS_EXTERNAL(func->h_labelinfos));
 
@@ -743,9 +742,8 @@ DUK_LOCAL void duk__convert_to_func_template(duk_compiler_ctx *comp_ctx, duk_boo
 	                     (long) funcs_count, (long) sizeof(duk_hobject *),
 	                     (long) code_size, (long) data_size));
 
-	duk_push_fixed_buffer(ctx, data_size);
-	h_data = (duk_hbuffer_fixed *) duk_get_hbuffer(ctx, -1);
-	DUK_ASSERT(h_data != NULL);
+	duk_push_fixed_buffer_nozero(ctx, data_size);
+	h_data = (duk_hbuffer_fixed *) duk_known_hbuffer(ctx, -1);
 
 	DUK_HCOMPFUNC_SET_DATA(thr->heap, h_res, (duk_hbuffer *) h_data);
 	DUK_HEAPHDR_INCREF(thr, h_data);
@@ -1819,26 +1817,6 @@ DUK_LOCAL void duk__copy_ivalue(duk_compiler_ctx *comp_ctx, duk_ivalue *src, duk
 	duk_copy(ctx, src->x2.valstack_idx, dst->x2.valstack_idx);
 }
 
-/* XXX: to util */
-DUK_LOCAL duk_bool_t duk__is_whole_get_int32(duk_double_t x, duk_int32_t *ival) {
-	duk_small_int_t c;
-	duk_int32_t t;
-
-	c = DUK_FPCLASSIFY(x);
-	if (c == DUK_FP_NORMAL || (c == DUK_FP_ZERO && !DUK_SIGNBIT(x))) {
-		/* Don't allow negative zero as it will cause trouble with
-		 * LDINT+LDINTX.  But positive zero is OK.
-		 */
-		t = (duk_int32_t) x;
-		if ((duk_double_t) t == x) {
-			*ival = t;
-			return 1;
-		}
-	}
-
-	return 0;
-}
-
 DUK_LOCAL duk_reg_t duk__alloctemps(duk_compiler_ctx *comp_ctx, duk_small_int_t num) {
 	duk_reg_t res;
 
@@ -2061,7 +2039,7 @@ duk_regconst_t duk__ispec_toregconst_raw(duk_compiler_ctx *comp_ctx,
 				 * Currently always prefer LDINT+LDINTX over a double constant.
 				 */
 
-				if (duk__is_whole_get_int32(dval, &ival)) {
+				if (duk_is_whole_get_int32_nonegzero(dval, &ival)) {
 					dest = (forced_reg >= 0 ? forced_reg : DUK__ALLOCTEMP(comp_ctx));
 					duk__emit_load_int32(comp_ctx, dest, ival);
 					return (duk_regconst_t) dest;
@@ -2416,8 +2394,7 @@ DUK_LOCAL duk_reg_t duk__lookup_active_register_binding(duk_compiler_ctx *comp_c
 	 *  Special name handling
 	 */
 
-	h_varname = duk_get_hstring(ctx, -1);
-	DUK_ASSERT(h_varname != NULL);
+	h_varname = duk_known_hstring(ctx, -1);
 
 	if (h_varname == DUK_HTHREAD_STRING_LC_ARGUMENTS(thr)) {
 		DUK_DDD(DUK_DDDPRINT("flagging function as accessing 'arguments'"));
@@ -3677,8 +3654,7 @@ DUK_LOCAL void duk__expr_nud(duk_compiler_ctx *comp_ctx, duk_ivalue *res) {
 			duk_reg_t reg_varbind;
 			duk_regconst_t rc_varname;
 
-			h_varname = duk_get_hstring(ctx, res->x1.valstack_idx);
-			DUK_ASSERT(h_varname != NULL);
+			h_varname = duk_known_hstring(ctx, res->x1.valstack_idx);
 
 			if (duk__hstring_is_eval_or_arguments_in_strict_mode(comp_ctx, h_varname)) {
 				goto syntax_error;
@@ -3867,8 +3843,7 @@ DUK_LOCAL void duk__expr_led(duk_compiler_ctx *comp_ctx, duk_ivalue *left, duk_i
 
 			DUK_DDD(DUK_DDDPRINT("function call with identifier base"));
 
-			h_varname = duk_get_hstring(ctx, left->x1.valstack_idx);
-			DUK_ASSERT(h_varname != NULL);
+			h_varname = duk_known_hstring(ctx, left->x1.valstack_idx);
 			if (h_varname == DUK_HTHREAD_STRING_EVAL(thr)) {
 				/* Potential direct eval call detected, flag the CALL
 				 * so that a run-time "direct eval" check is made and
@@ -4353,8 +4328,7 @@ DUK_LOCAL void duk__expr_led(duk_compiler_ctx *comp_ctx, duk_ivalue *left, duk_i
 
 			DUK_ASSERT(left->x1.t == DUK_ISPEC_VALUE);  /* LHS is already side effect free */
 
-			h_varname = duk_get_hstring(ctx, left->x1.valstack_idx);
-			DUK_ASSERT(h_varname != NULL);
+			h_varname = duk_known_hstring(ctx, left->x1.valstack_idx);
 			if (duk__hstring_is_eval_or_arguments_in_strict_mode(comp_ctx, h_varname)) {
 				/* E5 Section 11.13.1 (and others for other assignments), step 4. */
 				goto syntax_error_lvalue;
@@ -4648,8 +4622,7 @@ DUK_LOCAL void duk__expr_led(duk_compiler_ctx *comp_ctx, duk_ivalue *left, duk_i
 			duk_reg_t reg_varbind;
 			duk_regconst_t rc_varname;
 
-			h_varname = duk_get_hstring(ctx, left->x1.valstack_idx);
-			DUK_ASSERT(h_varname != NULL);
+			h_varname = duk_known_hstring(ctx, left->x1.valstack_idx);
 
 			if (duk__hstring_is_eval_or_arguments_in_strict_mode(comp_ctx, h_varname)) {
 				goto syntax_error;
@@ -6287,8 +6260,7 @@ DUK_LOCAL void duk__parse_stmt(duk_compiler_ctx *comp_ctx, duk_ivalue *res, duk_
 
 				duk_get_prop_index(ctx, comp_ctx->curr_func.funcs_idx, fnum * 3);
 				duk_get_prop_stridx(ctx, -1, DUK_STRIDX_NAME);  /* -> [ ... func name ] */
-				h_funcname = duk_get_hstring(ctx, -1);
-				DUK_ASSERT(h_funcname != NULL);
+				h_funcname = duk_known_hstring(ctx, -1);
 
 				DUK_DDD(DUK_DDDPRINT("register function declaration %!O in pass 1, fnum %ld",
 				                     (duk_heaphdr *) h_funcname, (long) fnum));
@@ -6817,8 +6789,7 @@ DUK_LOCAL void duk__init_varmap_and_prologue_for_pass2(duk_compiler_ctx *comp_ct
 
 	for (i = 0; i < num_args; i++) {
 		duk_get_prop_index(ctx, comp_ctx->curr_func.argnames_idx, i);
-		h_name = duk_get_hstring(ctx, -1);
-		DUK_ASSERT(h_name != NULL);
+		h_name = duk_known_hstring(ctx, -1);
 
 		if (comp_ctx->curr_func.is_strict) {
 			if (duk__hstring_is_eval_or_arguments(comp_ctx, h_name)) {
@@ -7010,8 +6981,7 @@ DUK_LOCAL void duk__init_varmap_and_prologue_for_pass2(duk_compiler_ctx *comp_ct
 			/* shadowed, ignore */
 		} else {
 			duk_get_prop_index(ctx, comp_ctx->curr_func.decls_idx, i);  /* decl name */
-			h_name = duk_get_hstring(ctx, -1);
-			DUK_ASSERT(h_name != NULL);
+			h_name = duk_known_hstring(ctx, -1);
 
 			if (h_name == DUK_HTHREAD_STRING_LC_ARGUMENTS(thr) &&
 			    !comp_ctx->curr_func.is_arguments_shadowed) {
@@ -7466,8 +7436,7 @@ DUK_LOCAL void duk__parse_func_like_raw(duk_compiler_ctx *comp_ctx, duk_bool_t i
 		} else {
 			DUK_ERROR_SYNTAX(thr, DUK_STR_INVALID_GETSET_NAME);
 		}
-		comp_ctx->curr_func.h_name = duk_get_hstring(ctx, -1);  /* borrowed reference */
-		DUK_ASSERT(comp_ctx->curr_func.h_name != NULL);
+		comp_ctx->curr_func.h_name = duk_known_hstring(ctx, -1);  /* borrowed reference */
 		duk__advance(comp_ctx);
 	} else {
 		/* Function name is an Identifier (not IdentifierName), but we get
@@ -7476,8 +7445,7 @@ DUK_LOCAL void duk__parse_func_like_raw(duk_compiler_ctx *comp_ctx, duk_bool_t i
 		 */
 		if (comp_ctx->curr_token.t_nores == DUK_TOK_IDENTIFIER) {
 			duk_push_hstring(ctx, comp_ctx->curr_token.str1);       /* keep in valstack */
-			comp_ctx->curr_func.h_name = duk_get_hstring(ctx, -1);  /* borrowed reference */
-			DUK_ASSERT(comp_ctx->curr_func.h_name != NULL);
+			comp_ctx->curr_func.h_name = duk_known_hstring(ctx, -1);  /* borrowed reference */
 			duk__advance(comp_ctx);
 		} else {
 			/* valstack will be unbalanced, which is OK */
@@ -7725,8 +7693,7 @@ DUK_LOCAL duk_ret_t duk__js_compile_raw(duk_context *ctx, void *udata) {
 	comp_ctx->lex.slot1_idx = comp_ctx->tok11_idx;
 	comp_ctx->lex.slot2_idx = comp_ctx->tok12_idx;
 	comp_ctx->lex.buf_idx = entry_top + 0;
-	comp_ctx->lex.buf = (duk_hbuffer_dynamic *) duk_get_hbuffer(ctx, entry_top + 0);
-	DUK_ASSERT(comp_ctx->lex.buf != NULL);
+	comp_ctx->lex.buf = (duk_hbuffer_dynamic *) duk_known_hbuffer(ctx, entry_top + 0);
 	DUK_ASSERT(DUK_HBUFFER_HAS_DYNAMIC(comp_ctx->lex.buf) && !DUK_HBUFFER_HAS_EXTERNAL(comp_ctx->lex.buf));
 	comp_ctx->lex.token_limit = DUK_COMPILER_TOKEN_LIMIT;
 
@@ -7824,7 +7791,7 @@ DUK_INTERNAL void duk_js_compile(duk_hthread *thr, const duk_uint8_t *src_buffer
 
 	if (safe_rc != DUK_EXEC_SUCCESS) {
 		DUK_D(DUK_DPRINT("compilation failed: %!T", duk_get_tval(ctx, -1)));
-		duk_throw(ctx);
+		(void) duk_throw(ctx);
 	}
 
 	/* [ ... template ] */

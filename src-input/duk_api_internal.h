@@ -108,6 +108,12 @@ DUK_INTERNAL_DECL duk_hobject *duk_require_hobject_accept_mask(duk_context *ctx,
 DUK_INTERNAL_DECL void *duk_get_voidptr(duk_context *ctx, duk_idx_t idx);
 #endif
 
+DUK_INTERNAL_DECL duk_hstring *duk_known_hstring(duk_context *ctx, duk_idx_t idx);
+DUK_INTERNAL_DECL duk_hobject *duk_known_hobject(duk_context *ctx, duk_idx_t idx);
+DUK_INTERNAL_DECL duk_hbuffer *duk_known_hbuffer(duk_context *ctx, duk_idx_t idx);
+DUK_INTERNAL_DECL duk_hcompfunc *duk_known_hcompfunc(duk_context *ctx, duk_idx_t idx);
+DUK_INTERNAL_DECL duk_hnatfunc *duk_known_hnatfunc(duk_context *ctx, duk_idx_t idx);
+
 DUK_INTERNAL_DECL duk_hstring *duk_to_hstring(duk_context *ctx, duk_idx_t idx);
 DUK_INTERNAL_DECL duk_hobject *duk_to_hobject(duk_context *ctx, duk_idx_t idx);
 
@@ -161,6 +167,9 @@ DUK_INTERNAL_DECL void duk_push_lightfunc_tostring(duk_context *ctx, duk_tval *t
 DUK_INTERNAL_DECL duk_hbufobj *duk_push_bufobj_raw(duk_context *ctx, duk_uint_t hobject_flags_and_class, duk_small_int_t prototype_bidx);
 #endif
 
+#define duk_push_fixed_buffer_nozero(ctx,size) \
+	duk_push_buffer_raw((ctx), (size), DUK_BUF_FLAG_NOZERO)
+
 DUK_INTERNAL_DECL const char *duk_push_string_readable(duk_context *ctx, duk_idx_t idx);
 DUK_INTERNAL_DECL const char *duk_push_string_tval_readable(duk_context *ctx, duk_tval *tv);
 DUK_INTERNAL_DECL const char *duk_push_string_tval_readable_error(duk_context *ctx, duk_tval *tv);
@@ -197,6 +206,8 @@ DUK_INTERNAL_DECL void duk_unpack(duk_context *ctx);
 #endif
 
 DUK_INTERNAL_DECL void duk_require_constructor_call(duk_context *ctx);
+
+DUK_INTERNAL_DECL void duk_require_constructable(duk_context *ctx, duk_idx_t idx);
 
 /* Raw internal valstack access macros: access is unsafe so call site
  * must have a guarantee that the index is valid.  When that is the case,

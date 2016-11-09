@@ -1785,6 +1785,14 @@ Planned
   in line with how application code detects active features and reduces
   footprint (GH-988)
 
+* Change return from of duk_throw(), duk_error(), and duk_fatal() from void
+  to duk_ret_t which allows them to be called using the idiom
+  "return duk_error(ctx, DUK_ERR_TYPE_ERROR, "invalid argument");"
+  (GH-1038, GH-1041)
+
+* Add convenience API calls to throw specific error types; for example,
+  duk_type_error(), duk_type_error_va(), duk_range_error(), etc (GH-1040)
+
 * Add convenience API calls duk_get_prop_lstring(), duk_put_prop_lstring(),
   duk_del_prop_lstring(), duk_has_prop_lstring(), duk_get_global_lstring(),
   duk_put_global_lstring() (GH-946, GH-953)
@@ -1820,9 +1828,27 @@ Planned
   e.g. "2 ** 10" evaluates to 1024, avoiding the cost of an Ecmascript call to
   Math.pow() while also being more readable (GH-987, GH-997)
 
+* Add a Reflect built-in, provides Reflect.construct() etc. from ES6; some
+  features like constructor retargeting require ES6+ semantics and are thus not
+  yet supported (GH-1025)
+
+* Add support for ES6 \u{H+} escape syntax for source code string literals
+  and identifiers, no RegExp support yet (requires RegExp /u Unicode mode)
+  (GH-1001)
+
+* Add support for ES6 octal (0o123) and binary (0b100001) literals (GH-1057)
+
+* Add support for ES6 String.prototype.codePointAt(), String.fromCodePoint(),
+  and String.prototype.repeat() (GH-1043, GH-1049, GH-1050)
+
 * Add TextEncoder and TextDecoder built-ins (the Encoding API) which allow
   Ecmascript code to read and write text stored in an ArrayBuffer or a plain
   buffer (GH-975)
+
+* Respect ES6 enumeration order (array index keys, other keys in insertion
+  order) for Object.getOwnPropertyNames(), also use the same order in
+  for-in, Object.keys(), and duk_enum() even though that's not strictly
+  required by ES6 or ES7 (GH-1054)
 
 * Remove no longer needed platform wrappers in duk_config.h: DUK_ABORT(),
   DUK_EXIT(), DUK_PRINTF(), DUK_FPRINTF(), DUK_FOPEN(), DUK_FCLOSE(),
@@ -1918,6 +1944,19 @@ Planned
   seed mixing; previous algorithm (Shamir's three-op algorithm) is still
   used for low memory targets and targets without 64-bit types (GH-970)
 
+* Change parsing of legacy octal literals so that 077 is parsed as octal
+  (= 63) but 078 is parsed as decimal (78) rather than causing a SyntaxError;
+  this aligns better with behavior of other engines (GH-1057)
+
+* Change parsing of octal escapes in string literals to better align with
+  ES6 and other engines; "\078" is now accepted and is the same as
+  "\u00078", "\8" and "\9" are accepted as literal "8" and "9"  (GH-1057)
+
+* Fix String.fromCharCode() behavior for non-BMP characters when standard
+  behavior is enabled (DUK_USE_NONSTD_STRING_FROMCHARCODE_32BIT disabled):
+  use ToUint16() + CESU-8 rather than ToUint32() + CESU-8 which produces
+  two codepoints for non-BMP characters (GH-1046)
+
 * Fix incorrect evaluation order of X <op>= Y expressions when the RHS
   (Y) mutates the value of X (GH-992)
 
@@ -1963,6 +2002,8 @@ Planned
   DUK_FILE_MACRO and DUK_LINE_MACRO, which matters if the standard file/line
   macros have been replaced in duk_config.h (GH-897)
 
+* Fix ARM64 platform detection for some Android targets (GH-1062)
+
 * Fix AmigaOS3 portability issue by enabling math function replacements
   automatically for AmigaOS on M68K, regardless of OS version or compiler
   (GH-932)
@@ -1996,12 +2037,16 @@ Planned
   Array .length coercion (GH-862); value stack operation optimization
   (GH-891); call related bytecode simplification (GH-896); minor bytecode
   opcode handler optimizations (GH-903); refcount optimizations (GH-443,
-  GH-973); minor RegExp compile/execute optimizations (GH-974)
+  GH-973, GH-1042); minor RegExp compile/execute optimizations (GH-974,
+  GH-1033); minor IEEE double handling optimizations (GH-1051); precomputed
+  duk_hstring array index (GH-1056)
 
 * Miscellaneous footprint improvements: RegExp compiler/executor (GH-977);
   internal duk_dup() variants (GH-990); allow stripping of (almost) all
   built-ins for low memory builds (GH-989); remove internal accessor setup
-  helper and use duk_def_prop() instead (GH-1010)
+  helper and use duk_def_prop() instead (GH-1010); minor IEEE double handling
+  optimizations (GH-1051); precomputed duk_hstring array index (GH-1056);
+  internal value stack access improvements (GH-1058)
 
 * Internal change: rework shared internal string handling so that shared
   strings are plain string constants used in macro values, rather than

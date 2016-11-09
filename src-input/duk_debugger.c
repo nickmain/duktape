@@ -66,7 +66,7 @@ DUK_LOCAL void duk__debug_do_detach1(duk_heap *heap, duk_int_t reason) {
 	/* heap->dbg_detached_cb: keep */
 	/* heap->dbg_udata: keep */
 	/* heap->dbg_processing: keep on purpose to avoid debugger re-entry in detaching state */
-	heap->dbg_paused = 0;
+	DUK_HEAP_CLEAR_DEBUGGER_PAUSED(heap);
 	heap->dbg_state_dirty = 0;
 	heap->dbg_force_restart = 0;
 	heap->dbg_step_type = 0;
@@ -352,7 +352,7 @@ DUK_LOCAL duk_hstring *duk__debug_read_hstring_raw(duk_hthread *thr, duk_uint32_
 		duk_debug_read_bytes(thr, buf, (duk_size_t) len);
 		duk_push_lstring(ctx, (const char *) buf, (duk_size_t) len);
 	} else {
-		p = (duk_uint8_t *) duk_push_fixed_buffer(ctx, (duk_size_t) len);
+		p = (duk_uint8_t *) duk_push_fixed_buffer(ctx, (duk_size_t) len);  /* zero for paranoia */
 		DUK_ASSERT(p != NULL);
 		duk_debug_read_bytes(thr, p, (duk_size_t) len);
 		(void) duk_buffer_to_string(ctx, -1);
@@ -393,7 +393,7 @@ DUK_LOCAL duk_hbuffer *duk__debug_read_hbuffer_raw(duk_hthread *thr, duk_uint32_
 	duk_context *ctx = (duk_context *) thr;
 	duk_uint8_t *p;
 
-	p = (duk_uint8_t *) duk_push_fixed_buffer(ctx, (duk_size_t) len);
+	p = (duk_uint8_t *) duk_push_fixed_buffer(ctx, (duk_size_t) len);  /* zero for paranoia */
 	DUK_ASSERT(p != NULL);
 	duk_debug_read_bytes(thr, p, (duk_size_t) len);
 
@@ -1001,7 +1001,7 @@ DUK_INTERNAL void duk_debug_send_status(duk_hthread *thr) {
 	duk_activation *act;
 
 	duk_debug_write_notify(thr, DUK_DBG_CMD_STATUS);
-	duk_debug_write_int(thr, thr->heap->dbg_paused);
+	duk_debug_write_int(thr, (DUK_HEAP_HAS_DEBUGGER_PAUSED(thr->heap) ? 1 : 0));
 
 	DUK_ASSERT_DISABLE(thr->callstack_top >= 0);  /* unsigned */
 	if (thr->callstack_top == 0) {
@@ -1222,7 +1222,7 @@ DUK_LOCAL void duk__debug_handle_step(duk_hthread *thr, duk_heap *heap, duk_int3
 
 	line = duk_debug_curr_line(thr);
 	if (line > 0) {
-		heap->dbg_paused = 0;
+		DUK_HEAP_CLEAR_DEBUGGER_PAUSED(heap);
 		heap->dbg_step_type = step_type;
 		heap->dbg_step_thread = thr;
 		heap->dbg_step_csindex = thr->callstack_top - 1;
@@ -1463,8 +1463,7 @@ DUK_LOCAL void duk__debug_handle_get_locals(duk_hthread *thr, duk_heap *heap) {
 	if (duk_is_object(ctx, -1)) {
 		duk_enum(ctx, -1, 0 /*enum_flags*/);
 		while (duk_next(ctx, -1 /*enum_index*/, 0 /*get_value*/)) {
-			varname = duk_get_hstring(ctx, -1);
-			DUK_ASSERT(varname != NULL);
+			varname = duk_known_hstring(ctx, -1);
 
 			duk_js_getvar_activation(thr, curr_act, varname, 0 /*throw_flag*/);
 			/* [ ... func varmap enum key value this ] */
@@ -2591,7 +2590,7 @@ DUK_INTERNAL duk_bool_t duk_debug_process_messages(duk_hthread *thr, duk_bool_t 
 			break;
 		}
 
-		if (!thr->heap->dbg_paused || no_block) {
+		if (!DUK_HEAP_HAS_DEBUGGER_PAUSED(thr->heap) || no_block) {
 			if (!duk_debug_read_peek(thr)) {
 				/* Note: peek cannot currently trigger a detach
 				 * so the dbg_detaching == 0 assert outside the
@@ -2686,7 +2685,7 @@ DUK_INTERNAL void duk_debug_halt_execution(duk_hthread *thr, duk_bool_t use_prev
 	 */
 
 	thr->heap->dbg_state_dirty = 1;
-	while (thr->heap->dbg_paused) {
+	while (DUK_HEAP_HAS_DEBUGGER_PAUSED(thr->heap)) {
 		DUK_ASSERT(DUK_HEAP_IS_DEBUGGER_ATTACHED(thr->heap));
 		DUK_ASSERT(thr->heap->dbg_processing);
 		duk_debug_process_messages(thr, 0 /*no_block*/);

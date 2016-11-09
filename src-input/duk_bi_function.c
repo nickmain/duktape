@@ -12,7 +12,6 @@ DUK_INTERNAL duk_ret_t duk_bi_function_prototype(duk_context *ctx) {
 }
 
 #if defined(DUK_USE_FUNCTION_BUILTIN)
-
 DUK_INTERNAL duk_ret_t duk_bi_function_constructor(duk_context *ctx) {
 	duk_hthread *thr = (duk_hthread *) ctx;
 	duk_hstring *h_sourcecode;
@@ -70,8 +69,7 @@ DUK_INTERNAL duk_ret_t duk_bi_function_constructor(duk_context *ctx) {
 	               (const duk_uint8_t *) DUK_HSTRING_GET_DATA(h_sourcecode),
 	               (duk_size_t) DUK_HSTRING_GET_BYTELEN(h_sourcecode),
 	               comp_flags);
-	func = (duk_hcompfunc *) duk_get_hobject(ctx, -1);
-	DUK_ASSERT(func != NULL);
+	func = (duk_hcompfunc *) duk_known_hobject(ctx, -1);
 	DUK_ASSERT(DUK_HOBJECT_IS_COMPFUNC((duk_hobject *) func));
 
 	/* [ body formals source template ] */
@@ -89,7 +87,9 @@ DUK_INTERNAL duk_ret_t duk_bi_function_constructor(duk_context *ctx) {
 
 	return 1;
 }
+#endif  /* DUK_USE_FUNCTION_BUILTIN */
 
+#if defined(DUK_USE_FUNCTION_BUILTIN)
 DUK_INTERNAL duk_ret_t duk_bi_function_prototype_to_string(duk_context *ctx) {
 	duk_tval *tv;
 
@@ -156,35 +156,73 @@ DUK_INTERNAL duk_ret_t duk_bi_function_prototype_to_string(duk_context *ctx) {
  type_error:
 	DUK_DCERROR_TYPE_INVALID_ARGS((duk_hthread *) ctx);
 }
+#endif
 
+#if defined(DUK_USE_FUNCTION_BUILTIN) || defined(DUK_USE_REFLECT_BUILTIN)
 DUK_INTERNAL duk_ret_t duk_bi_function_prototype_apply(duk_context *ctx) {
+	/*
+	 *  magic = 0: Function.prototype.apply()
+	 *  magic = 1: Reflect.apply()
+	 *  magic = 2: Reflect.construct()
+	 */
+
+	duk_idx_t idx_args;
 	duk_idx_t len;
 	duk_idx_t i;
+	duk_int_t magic;
+	duk_idx_t nargs;
+	duk_uint_t mask;
 
-	DUK_ASSERT_TOP(ctx, 2);  /* not a vararg function */
+	magic = duk_get_current_magic(ctx);
+	switch (magic) {
+	case 0:  /* Function.prototype.apply() */
+		DUK_ASSERT_TOP(ctx, 2);  /* not a vararg function */
+		duk_push_this(ctx);
+		duk_insert(ctx, 0);
+		/* Fall through intentionally for shared handling. */
+	case 1:  /* Reflect.apply(); Function.prototype.apply() after 'this' fixup. */
+		DUK_ASSERT_TOP(ctx, 3);  /* not a vararg function */
+		idx_args = 2;
+		duk_require_callable(ctx, 0);
+		break;
+	default:  /* Reflect.construct() */
+		DUK_ASSERT(magic == 2);
+		duk_require_constructable(ctx, 0);
+		nargs = duk_get_top(ctx);
+		if (nargs < 2) {
+			DUK_DCERROR_TYPE_INVALID_ARGS((duk_hthread *) ctx);
+		}
+		if (nargs >= 3 && !duk_strict_equals(ctx, 0, 2)) {
+			/* XXX: [[Construct]] newTarget currently unsupported */
+			DUK_ERROR_UNSUPPORTED((duk_hthread *) ctx);
+		}
+		idx_args = 1;
+		break;
+	}
 
-	duk_push_this(ctx);
-	duk_require_callable(ctx, -1);
-	duk_insert(ctx, 0);
-	DUK_ASSERT_TOP(ctx, 3);
+	if (magic != 2) {
+		DUK_DDD(DUK_DDDPRINT("func=%!iT, thisArg=%!iT, argArray=%!iT",
+							 (duk_tval *) duk_get_tval(ctx, 0),
+							 (duk_tval *) duk_get_tval(ctx, 1),
+							 (duk_tval *) duk_get_tval(ctx, 2)));
+	} else {
+		/* thisArg is not applicable for Reflect.construct(). */
+		DUK_DDD(DUK_DDDPRINT("func=%!iT, argArray=%!iT",
+							 (duk_tval *) duk_get_tval(ctx, 0),
+							 (duk_tval *) duk_get_tval(ctx, 1)));
+	}
 
-	DUK_DDD(DUK_DDDPRINT("func=%!iT, thisArg=%!iT, argArray=%!iT",
-	                     (duk_tval *) duk_get_tval(ctx, 0),
-	                     (duk_tval *) duk_get_tval(ctx, 1),
-	                     (duk_tval *) duk_get_tval(ctx, 2)));
+	/* [ func thisArg? argArray ] */
 
-	/* [ func thisArg argArray ] */
-
-	if (duk_is_null_or_undefined(ctx, 2)) {
+	mask = duk_get_type_mask(ctx, idx_args);
+	if (mask & (DUK_TYPE_MASK_NULL | DUK_TYPE_MASK_UNDEFINED)) {
 		DUK_DDD(DUK_DDDPRINT("argArray is null/undefined, no args"));
 		len = 0;
-	} else if (!duk_is_object(ctx, 2)) {
-		goto type_error;
-	} else {
+	} else if (mask & DUK_TYPE_MASK_OBJECT) {
 		DUK_DDD(DUK_DDDPRINT("argArray is an object"));
 
 		/* XXX: make this an internal helper */
-		duk_get_prop_stridx(ctx, 2, DUK_STRIDX_LENGTH);
+		duk_get_prop_stridx(ctx, idx_args, DUK_STRIDX_LENGTH);
 		len = (duk_idx_t) duk_to_uint32(ctx, -1);  /* ToUint32() coercion required */
 		duk_pop(ctx);
 
@@ -192,25 +230,38 @@ DUK_INTERNAL duk_ret_t duk_bi_function_prototype_apply(duk_context *ctx) {
 
 		DUK_DDD(DUK_DDDPRINT("argArray length is %ld", (long) len));
 		for (i = 0; i < len; i++) {
-			duk_get_prop_index(ctx, 2, i);
+			duk_get_prop_index(ctx, idx_args, i);
 		}
+	} else {
+		goto type_error;
 	}
-	duk_remove(ctx, 2);
-	DUK_ASSERT_TOP(ctx, 2 + len);
+	duk_remove(ctx, idx_args);
+	DUK_ASSERT_TOP(ctx, idx_args + len);
 
-	/* [ func thisArg arg1 ... argN ] */
+	/* [ func thisArg? arg1 ... argN ] */
 
-	DUK_DDD(DUK_DDDPRINT("apply, func=%!iT, thisArg=%!iT, len=%ld",
-	                     (duk_tval *) duk_get_tval(ctx, 0),
-	                     (duk_tval *) duk_get_tval(ctx, 1),
-	                     (long) len));
-	duk_call_method(ctx, len);
+	if (magic != 2) {
+		/* Function.prototype.apply() or Reflect.apply() */
+		DUK_DDD(DUK_DDDPRINT("apply, func=%!iT, thisArg=%!iT, len=%ld",
+							 (duk_tval *) duk_get_tval(ctx, 0),
+							 (duk_tval *) duk_get_tval(ctx, 1),
+							 (long) len));
+		duk_call_method(ctx, len);
+	} else {
+		/* Reflect.construct() */
+		DUK_DDD(DUK_DDDPRINT("construct, func=%!iT, len=%ld",
+							 (duk_tval *) duk_get_tval(ctx, 0),
+							 (long) len));
+		duk_new(ctx, len);
+	}
 	return 1;
 
  type_error:
 	DUK_DCERROR_TYPE_INVALID_ARGS((duk_hthread *) ctx);
 }
+#endif
 
+#if defined(DUK_USE_FUNCTION_BUILTIN)
 DUK_INTERNAL duk_ret_t duk_bi_function_prototype_call(duk_context *ctx) {
 	duk_idx_t nargs;
 
@@ -241,7 +292,9 @@ DUK_INTERNAL duk_ret_t duk_bi_function_prototype_call(duk_context *ctx) {
 	duk_call_method(ctx, nargs - 1);
 	return 1;
 }
+#endif  /* DUK_USE_FUNCTION_BUILTIN */
 
+#if defined(DUK_USE_FUNCTION_BUILTIN)
 /* XXX: the implementation now assumes "chained" bound functions,
  * whereas "collapsed" bound functions (where there is ever only
  * one bound function which directly points to a non-bound, final
@@ -275,8 +328,7 @@ DUK_INTERNAL duk_ret_t duk_bi_function_prototype_bind(duk_context *ctx) {
 	                       DUK_HOBJECT_FLAG_CONSTRUCTABLE |
 	                       DUK_HOBJECT_CLASS_AS_FLAGS(DUK_HOBJECT_CLASS_FUNCTION),
 	                       DUK_BIDX_FUNCTION_PROTOTYPE);
-	h_bound = duk_get_hobject(ctx, -1);
-	DUK_ASSERT(h_bound != NULL);
+	h_bound = duk_known_hobject(ctx, -1);
 
 	/* [ thisArg arg1 ... argN func boundFunc ] */
 	duk_dup_m2(ctx);  /* func */
@@ -338,5 +390,4 @@ DUK_INTERNAL duk_ret_t duk_bi_function_prototype_bind(duk_context *ctx) {
 
 	return 1;
 }
-
 #endif  /* DUK_USE_FUNCTION_BUILTIN */

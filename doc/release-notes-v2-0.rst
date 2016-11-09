@@ -230,7 +230,7 @@ changes below.  Here's a summary of changes:
   C code can still do so using ``duk_buffer_to_string()`` (or by direct buffer
   and string operations) and can expose such a binding to Ecmascript code.
 
-* Node.js Buffer binding has been aligned more with Node.js v6.8.1 (from
+* Node.js Buffer binding has been aligned more with Node.js v6.9.1 (from
   Node.js v0.12.1) and some (but not all) behavior differences to actual
   Node.js have been fixed.
 
@@ -270,7 +270,7 @@ To upgrade:
     using UTF-8, emitting replacement characters for invalid UTF-8 sequences.
 
   - Review Buffer code for Node.js Buffer changes between Node.js versions
-    v0.12.1 and v6.8.1 in general.
+    v0.12.1 and v6.9.1 in general.
 
 * If you're using plain buffers, review their usage especially in Ecmascript
   code.
@@ -600,6 +600,23 @@ To upgrade:
 * If you depend on API errors mapping to a plain ``Error``, revise such code
   to accept also ``TypeError`` or ``RangeError``.  (In general depending on a
   specific error type should be only be done when it's absolute necessary.)
+
+duk_error(), duk_error_va(), duk_throw(), duk_fatal() have a return value
+-------------------------------------------------------------------------
+
+The prototype return value for these error throwers was changed from ``void``
+to ``duk_ret_t`` which allows for idioms like::
+
+    if (argvalue < 0) {
+        return duk_error(ctx, DUK_ERR_TYPE_ERROR,
+                         "invalid arg: %d", (int) argvalue);
+    }
+
+To upgrade:
+
+* Without an explicit cast to ``(void) duk_error(...)`` you may get some new
+  compiler warnings.  Fix by adding the void cast, or convert the call sites
+  to use the ``return duk_error(...)`` idiom where applicable.
 
 duk_dump_context_stdout() and duk_dump_context_stderr() removed
 ---------------------------------------------------------------
@@ -959,6 +976,31 @@ To upgrade:
 * If you're using the user InitJS option, call sites need to be modified to
   run the init code explicitly on heap/thread creation.
 
+Enumeration order changes
+-------------------------
+
+Enumeration order for ``Object.getOwnPropertyNames()`` has been changed to
+match ES6/ES7 ``[[OwnPropertyKeys]]`` enumeration order, which is:
+
+* Array indices in ascending order
+
+* Normal (non-array-index) property keys in insertion order
+
+* Symbols in insertion order
+
+While not required by ES6/ES7, the same enumeration order is also used in
+Duktape 2.x for ``for-in``, ``Object.keys()``, and ``duk_enum()``.  A related
+change is that ``duk_enum()`` flags ``DUK_ENUM_ARRAY_INDICES_ONLY`` and
+``DUK_ENUM_SORT_ARRAY_INDICES`` can now be used independently.
+
+The revised enumeration order makes enumeration behavior more predictable
+and matches other modern engines.  In particular, sparse arrays (arrays
+without an internal array part) now enumerate identically to dense arrays.
+
+To upgrade:
+
+* Check application code for enumeration assumptions.
+
 Other incompatible changes
 --------------------------
 
@@ -967,6 +1009,20 @@ Other incompatible changes
 
 * If a user function is called using the identifier 'eval', such a call won't
   get tailcall optimized even if otherwise possible.
+
+* ``duk_char_code_at()`` and ``String.charCodeAt()`` now return 0xFFFD (Unicode
+  replacement character) if the string cannot be decoded as extended UTF-8,
+  previously an error was thrown.  This situation never occurs for standard
+  Ecmascript strings or valid UTF-8 strings.
+
+* Legacy octal literal handling has been improved to match more closely with
+  ES6 Annex B.  Octal look-alike decimal literals like "0778" and "0778.123"
+  are now allowed.
+
+* Legacy octal escape handling in string literals has been improved to match
+  more closely with ES6 Annex B and other engines: "\078" is not accepted and
+  is the same as "\u00078", "\8" and "\9" are accepted as literal "8" and "9"
+  (even in strict mode).
 
 Known issues
 ============

@@ -241,8 +241,7 @@ DUK_LOCAL duk_hbufobj *duk__push_arraybuffer_with_length(duk_context *ctx, duk_u
 	duk_hbufobj *h_bufobj;
 
 	(void) duk_push_fixed_buffer(ctx, (duk_size_t) len);
-	h_val = (duk_hbuffer *) duk_get_hbuffer(ctx, -1);
-	DUK_ASSERT(h_val != NULL);
+	h_val = (duk_hbuffer *) duk_known_hbuffer(ctx, -1);
 
 	h_bufobj = duk_push_bufobj_raw(ctx,
 	                               DUK_HOBJECT_FLAG_EXTENSIBLE |
@@ -549,7 +548,7 @@ DUK_LOCAL duk_hbuffer *duk__hbufobj_fixed_from_argvalue(duk_context *ctx) {
 		(void) duk_get_prop_string(ctx, 0, "length");
 		len = duk_to_int_clamped(ctx, -1, 0, DUK_INT_MAX);
 		duk_pop(ctx);
-		buf = (duk_uint8_t *) duk_push_fixed_buffer(ctx, (duk_size_t) len);
+		buf = (duk_uint8_t *) duk_push_fixed_buffer_nozero(ctx, (duk_size_t) len);  /* no zeroing, all indices get initialized */
 		for (i = 0; i < len; i++) {
 			/* XXX: fast path for array or buffer arguments? */
 			duk_get_prop_index(ctx, 0, (duk_uarridx_t) i);
@@ -568,7 +567,7 @@ DUK_LOCAL duk_hbuffer *duk__hbufobj_fixed_from_argvalue(duk_context *ctx) {
 		DUK_ERROR_TYPE_INVALID_ARGS((duk_hthread *) ctx);
 	}
 	DUK_ASSERT(duk_is_buffer(ctx, -1));
-	return duk_get_hbuffer(ctx, -1);
+	return duk_known_hbuffer(ctx, -1);
 }
 #endif  /* DUK_USE_BUFFEROBJECT_SUPPORT */
 
@@ -623,8 +622,7 @@ DUK_INTERNAL duk_ret_t duk_bi_arraybuffer_constructor(duk_context *ctx) {
 		goto fail_length;
 	}
 	(void) duk_push_fixed_buffer(ctx, (duk_size_t) len);
-	h_val = (duk_hbuffer *) duk_get_hbuffer(ctx, -1);
-	DUK_ASSERT(h_val != NULL);
+	h_val = (duk_hbuffer *) duk_known_hbuffer(ctx, -1);
 
 #if !defined(DUK_USE_ZERO_BUFFER_DATA)
 	/* Khronos/ES6 requires zeroing even when DUK_USE_ZERO_BUFFER_DATA
@@ -1170,7 +1168,7 @@ DUK_INTERNAL duk_ret_t duk_bi_nodejs_buffer_tostring(duk_context *ctx) {
 	                                     &end_offset);
 
 	slice_length = (duk_size_t) (end_offset - start_offset);
-	buf_slice = (duk_uint8_t *) duk_push_fixed_buffer(ctx, slice_length);
+	buf_slice = (duk_uint8_t *) duk_push_fixed_buffer_nozero(ctx, slice_length);  /* all bytes initialized below */
 	DUK_ASSERT(buf_slice != NULL);
 
 	/* Neutered or uncovered, TypeError. */
@@ -1600,8 +1598,7 @@ DUK_INTERNAL duk_ret_t duk_bi_typedarray_set(duk_context *ctx) {
 	}
 
 	duk_hbufobj_promote_plain(ctx, 0);
-	h_obj = duk_require_hobject(ctx, 0);
-	DUK_ASSERT(h_obj != NULL);
+	h_obj = duk_known_hobject(ctx, 0);
 
 	/* XXX: V8 throws a TypeError for negative values.  Would it
 	 * be more useful to interpret negative offsets here from the
@@ -1755,7 +1752,7 @@ DUK_INTERNAL duk_ret_t duk_bi_typedarray_set(duk_context *ctx) {
 			duk_uint8_t *p_src_copy;
 
 			DUK_DDD(DUK_DDDPRINT("there is overlap, make a copy of the source"));
-			p_src_copy = (duk_uint8_t *) duk_push_fixed_buffer(ctx, src_length);
+			p_src_copy = (duk_uint8_t *) duk_push_fixed_buffer_nozero(ctx, src_length);
 			DUK_ASSERT(p_src_copy != NULL);
 			DUK_MEMCPY((void *) p_src_copy, (const void *) p_src_base, (size_t) src_length);
 
@@ -1884,7 +1881,7 @@ DUK_LOCAL void duk__arraybuffer_plain_slice(duk_context *ctx, duk_hbuffer *h_val
 	DUK_ASSERT(end_offset >= start_offset);
 	slice_length = (duk_uint_t) (end_offset - start_offset);
 
-	p_copy = (duk_uint8_t *) duk_push_fixed_buffer(ctx, (duk_size_t) slice_length);
+	p_copy = (duk_uint8_t *) duk_push_fixed_buffer_nozero(ctx, (duk_size_t) slice_length);
 	DUK_ASSERT(p_copy != NULL);
 	copy_length = slice_length;
 
@@ -2007,7 +2004,7 @@ DUK_INTERNAL duk_ret_t duk_bi_buffer_slice_shared(duk_context *ctx) {
 		duk_uint8_t *p_copy;
 		duk_size_t copy_length;
 
-		p_copy = (duk_uint8_t *) duk_push_fixed_buffer(ctx, (duk_size_t) slice_length);
+		p_copy = (duk_uint8_t *) duk_push_fixed_buffer(ctx, (duk_size_t) slice_length);  /* must be zeroed, not all bytes always copied */
 		DUK_ASSERT(p_copy != NULL);
 
 		/* Copy slice, respecting underlying buffer limits; remainder
@@ -2018,8 +2015,7 @@ DUK_INTERNAL duk_ret_t duk_bi_buffer_slice_shared(duk_context *ctx) {
 		           (const void *) (DUK_HBUFOBJ_GET_SLICE_BASE(thr->heap, h_this) + start_offset),
 		           copy_length);
 
-		h_val = duk_get_hbuffer(ctx, -1);
-		DUK_ASSERT(h_val != NULL);
+		h_val = duk_known_hbuffer(ctx, -1);
 
 		h_bufobj->buf = h_val;
 		DUK_HBUFFER_INCREF(thr, h_val);
@@ -2194,7 +2190,7 @@ DUK_INTERNAL duk_ret_t duk_bi_nodejs_buffer_concat(duk_context *ctx) {
 	                               DUK_BIDX_NODEJS_BUFFER_PROTOTYPE);
 	DUK_ASSERT(h_bufres != NULL);
 
-	p = (duk_uint8_t *) duk_push_fixed_buffer(ctx, total_length);
+	p = (duk_uint8_t *) duk_push_fixed_buffer(ctx, total_length);  /* must be zeroed, all bytes not necessarily written over */
 	DUK_ASSERT(p != NULL);
 	space_left = total_length;
 
@@ -2225,8 +2221,7 @@ DUK_INTERNAL duk_ret_t duk_bi_nodejs_buffer_concat(duk_context *ctx) {
 		duk_pop(ctx);
 	}
 
-	h_val = duk_get_hbuffer(ctx, -1);
-	DUK_ASSERT(h_val != NULL);
+	h_val = duk_known_hbuffer(ctx, -1);
 
 	duk__set_bufobj_buffer(ctx, h_bufres, h_val);
 	DUK_ASSERT_HBUFOBJ_VALID(h_bufres);

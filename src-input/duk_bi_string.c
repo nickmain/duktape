@@ -48,7 +48,7 @@ DUK_INTERNAL duk_ret_t duk_bi_string_constructor(duk_context *ctx) {
 	return 1;
 }
 
-DUK_INTERNAL duk_ret_t duk_bi_string_constructor_from_char_code(duk_context *ctx) {
+DUK_LOCAL duk_ret_t duk__construct_from_codepoints(duk_context *ctx, duk_bool_t nonbmp) {
 	duk_hthread *thr = (duk_hthread *) ctx;
 	duk_bufwriter_ctx bw_alloc;
 	duk_bufwriter_ctx *bw;
@@ -71,25 +71,51 @@ DUK_INTERNAL duk_ret_t duk_bi_string_constructor_from_char_code(duk_context *ctx
 		 * with one ensure call but the relative benefit would be quite small.
 		 */
 
+		if (nonbmp) {
+			/* ES6 requires that (1) SameValue(cp, ToInteger(cp)) and
+			 * (2) cp >= 0 and cp <= 0x10ffff.  This check does not
+			 * implement the steps exactly but the outcome should be
+			 * the same.
+			 */
+			duk_int32_t i32 = 0;
+			if (!duk_is_whole_get_int32(duk_to_number(ctx, i), &i32) ||
+			    i32 < 0 || i32 > 0x10ffffL) {
+				DUK_DCERROR_RANGE_INVALID_ARGS((duk_hthread *) ctx);
+			}
+			cp = (duk_ucodepoint_t) i32;
+			DUK_ASSERT(cp >= 0 && cp <= 0x10ffffL);
+			DUK_BW_WRITE_ENSURE_CESU8(thr, bw, cp);
+		} else {
 #if defined(DUK_USE_NONSTD_STRING_FROMCHARCODE_32BIT)
-		/* ToUint16() coercion is mandatory in the E5.1 specification, but
-		 * this non-compliant behavior makes more sense because we support
-		 * non-BMP codepoints.  Don't use CESU-8 because that'd create
-		 * surrogate pairs.
-		 */
-
-		cp = (duk_ucodepoint_t) duk_to_uint32(ctx, i);
-		DUK_BW_WRITE_ENSURE_XUTF8(thr, bw, cp);
+			/* ToUint16() coercion is mandatory in the E5.1 specification, but
+			 * this non-compliant behavior makes more sense because we support
+			 * non-BMP codepoints.  Don't use CESU-8 because that'd create
+			 * surrogate pairs.
+			 */
+			cp = (duk_ucodepoint_t) duk_to_uint32(ctx, i);
+			DUK_BW_WRITE_ENSURE_XUTF8(thr, bw, cp);
 #else
-		cp = (duk_ucodepoint_t) duk_to_uint32(ctx, i);
-		DUK_BW_WRITE_ENSURE_CESU8(thr, bw, cp);
+			cp = (duk_ucodepoint_t) duk_to_uint16(ctx, i);
+			DUK_ASSERT(cp >= 0 && cp <= 0x10ffffL);
+			DUK_BW_WRITE_ENSURE_CESU8(thr, bw, cp);
 #endif
+		}
 	}
 
 	DUK_BW_COMPACT(thr, bw);
 	(void) duk_buffer_to_string(ctx, -1);
 	return 1;
 }
+
+DUK_INTERNAL duk_ret_t duk_bi_string_constructor_from_char_code(duk_context *ctx) {
+	return duk__construct_from_codepoints(ctx, 0 /*nonbmp*/);
+}
+
+#if defined(DUK_USE_ES6)
+DUK_INTERNAL duk_ret_t duk_bi_string_constructor_from_code_point(duk_context *ctx) {
+	return duk__construct_from_codepoints(ctx, 1 /*nonbmp*/);
+}
+#endif
 
 /*
  *  toString(), valueOf()
@@ -143,11 +169,14 @@ DUK_INTERNAL duk_ret_t duk_bi_string_prototype_char_at(duk_context *ctx) {
 	return 1;
 }
 
+/* Magic: 0=charCodeAt, 1=codePointAt */
 DUK_INTERNAL duk_ret_t duk_bi_string_prototype_char_code_at(duk_context *ctx) {
 	duk_hthread *thr = (duk_hthread *) ctx;
 	duk_int_t pos;
 	duk_hstring *h;
 	duk_bool_t clamped;
+	duk_uint32_t cp;
+	duk_int_t magic;
 
 	/* XXX: faster implementation */
 
@@ -161,12 +190,24 @@ DUK_INTERNAL duk_ret_t duk_bi_string_prototype_char_code_at(duk_context *ctx) {
 	                             0 /*min(incl)*/,
 	                             DUK_HSTRING_GET_CHARLEN(h) - 1 /*max(incl)*/,
 	                             &clamped /*out_clamped*/);
+#if defined(DUK_USE_ES6)
+	magic = duk_get_current_magic(ctx);
+#else
+	DUK_ASSERT(duk_get_current_magic(ctx) == 0);
+	magic = 0;
+#endif
 	if (clamped) {
-		duk_push_number(ctx, DUK_DOUBLE_NAN);
-		return 1;
+		/* For out-of-bounds indices .charCodeAt() returns NaN and
+		 * .codePointAt() returns undefined.
+		 */
+		if (magic != 0) {
+			return 0;
+		}
+		duk_push_nan(ctx);
+	} else {
+		cp = (duk_uint32_t) duk_hstring_char_code_at_raw(thr, h, pos, (duk_bool_t) magic /*surrogate_aware*/);
+		duk_push_u32(ctx, cp);
 	}
-
-	duk_push_u32(ctx, (duk_uint32_t) duk_hstring_char_code_at_raw(thr, h, pos));
 	return 1;
 }
 
@@ -538,8 +579,7 @@ DUK_INTERNAL duk_ret_t duk_bi_string_prototype_replace(duk_context *ctx) {
 
 			duk_get_prop_index(ctx, -1, 0);
 			DUK_ASSERT(duk_is_string(ctx, -1));
-			h_match = duk_get_hstring(ctx, -1);
-			DUK_ASSERT(h_match != NULL);
+			h_match = duk_known_hstring(ctx, -1);
 			duk_pop(ctx);  /* h_match is borrowed, remains reachable through match_obj */
 
 			if (DUK_HSTRING_GET_BYTELEN(h_match) == 0) {
@@ -575,8 +615,7 @@ DUK_INTERNAL duk_ret_t duk_bi_string_prototype_replace(duk_context *ctx) {
 			p_end = p_start + DUK_HSTRING_GET_BYTELEN(h_input);
 			p = p_start;
 
-			h_search = duk_get_hstring(ctx, 0);
-			DUK_ASSERT(h_search != NULL);
+			h_search = duk_known_hstring(ctx, 0);
 			q_start = DUK_HSTRING_GET_DATA(h_search);
 			q_blen = (duk_size_t) DUK_HSTRING_GET_BYTELEN(h_search);
 
@@ -588,8 +627,7 @@ DUK_INTERNAL duk_ret_t duk_bi_string_prototype_replace(duk_context *ctx) {
 				DUK_ASSERT(p + q_blen <= DUK_HSTRING_GET_DATA(h_input) + DUK_HSTRING_GET_BYTELEN(h_input));
 				if (DUK_MEMCMP((const void *) p, (const void *) q_start, (size_t) q_blen) == 0) {
 					duk_dup_0(ctx);
-					h_match = duk_get_hstring(ctx, -1);
-					DUK_ASSERT(h_match != NULL);
+					h_match = duk_known_hstring(ctx, -1);
 #ifdef DUK_USE_REGEXP_SUPPORT
 					match_caps = 0;
 #endif
@@ -747,8 +785,7 @@ DUK_INTERNAL duk_ret_t duk_bi_string_prototype_replace(duk_context *ctx) {
 						if (duk_is_string(ctx, -1)) {
 							duk_hstring *h_tmp_str;
 
-							h_tmp_str = duk_get_hstring(ctx, -1);
-							DUK_ASSERT(h_tmp_str != NULL);
+							h_tmp_str = duk_known_hstring(ctx, -1);
 
 							DUK_BW_WRITE_ENSURE_HSTRING(thr, bw, h_tmp_str);
 						} else {
@@ -935,8 +972,7 @@ DUK_INTERNAL duk_ret_t duk_bi_string_prototype_split(duk_context *ctx) {
 			p_end = p_start + DUK_HSTRING_GET_BYTELEN(h_input);
 			p = p_start + prev_match_end_boff;
 
-			h_sep = duk_get_hstring(ctx, 0);
-			DUK_ASSERT(h_sep != NULL);
+			h_sep = duk_known_hstring(ctx, 0);
 			q_start = DUK_HSTRING_GET_DATA(h_sep);
 			q_blen = (duk_size_t) DUK_HSTRING_GET_BYTELEN(h_sep);
 			q_clen = (duk_size_t) DUK_HSTRING_GET_CHARLEN(h_sep);
@@ -1241,6 +1277,104 @@ DUK_INTERNAL duk_ret_t duk_bi_string_prototype_trim(duk_context *ctx) {
 	DUK_ASSERT_TOP(ctx, 1);
 	return 1;
 }
+
+#if defined(DUK_USE_ES6)
+DUK_INTERNAL duk_ret_t duk_bi_string_prototype_repeat(duk_context *ctx) {
+	duk_hstring *h_input;
+	duk_size_t input_blen;
+	duk_size_t result_len;
+	duk_int_t count_signed;
+	duk_uint_t count;
+	const duk_uint8_t *src;
+	duk_uint8_t *buf;
+	duk_uint8_t *p;
+	duk_double_t d;
+#if !defined(DUK_USE_PREFER_SIZE)
+	duk_size_t copy_size;
+	duk_uint8_t *p_end;
+#endif
+
+	DUK_ASSERT_TOP(ctx, 1);
+	h_input = duk_push_this_coercible_to_string(ctx);
+	DUK_ASSERT(h_input != NULL);
+	input_blen = DUK_HSTRING_GET_BYTELEN(h_input);
+
+	/* Count is ToNumber() coerced; +Infinity must be always rejected
+	 * (even if input string is zero length), as well as negative values
+	 * and -Infinity.  -Infinity doesn't require an explicit check
+	 * because duk_get_int() clamps it to DUK_INT_MIN which gets rejected
+	 * as a negative value (regardless of input string length).
+	 */
+	d = duk_to_number(ctx, 0);
+	if (duk_double_is_posinf(d)) {
+		goto fail_range;
+	}
+	count_signed = duk_get_int(ctx, 0);
+	if (count_signed < 0) {
+		goto fail_range;
+	}
+	count = (duk_uint_t) count_signed;
+
+	/* Overflow check for result length. */
+	result_len = count * input_blen;
+	if (count != 0 && result_len / count != input_blen) {
+		goto fail_range;
+	}
+
+	/* Temporary fixed buffer, later converted to string. */
+	buf = (duk_uint8_t *) duk_push_fixed_buffer_nozero(ctx, result_len);
+	src = (const duk_uint8_t *) DUK_HSTRING_GET_DATA(h_input);
+
+#if defined(DUK_USE_PREFER_SIZE)
+	p = buf;
+	while (count-- > 0) {
+		DUK_MEMCPY((void *) p, (const void *) src, input_blen);  /* copy size may be zero */
+		p += input_blen;
+	}
+#else  /* DUK_USE_PREFER_SIZE */
+	/* Take advantage of already copied pieces to speed up the process
+	 * especially for small repeated strings.
+	 */
+	p = buf;
+	p_end = p + result_len;
+	copy_size = input_blen;
+	for (;;) {
+		duk_size_t remain = (duk_size_t) (p_end - p);
+		DUK_DDD(DUK_DDDPRINT("remain=%ld, copy_size=%ld, input_blen=%ld, result_len=%ld",
+		                     (long) remain, (long) copy_size, (long) input_blen,
+		                     (long) result_len));
+		if (remain <= copy_size) {
+			/* If result_len is zero, this case is taken and does
+			 * a zero size copy.
+			 */
+			DUK_MEMCPY((void *) p, (const void *) src, remain);
+			break;
+		} else {
+			DUK_MEMCPY((void *) p, (const void *) src, copy_size);
+			p += copy_size;
+			copy_size *= 2;
+		}
+
+		src = (const duk_uint8_t *) buf;  /* Use buf as source for larger copies. */
+	}
+#endif  /* DUK_USE_PREFER_SIZE */
+
+	/* XXX: It would be useful to be able to create a duk_hstring with
+	 * a certain byte size whose data area wasn't initialized and which
+	 * wasn't in the string table yet.  This would allow a string to be
+	 * constructed directly without a buffer temporary and when it was
+	 * finished, it could be injected into the string table.  Currently
+	 * this isn't possible because duk_hstrings are only tracked by the
+	 * intern table (they are not in heap_allocated).
+	 */
+
+	duk_buffer_to_string(ctx, -1);
+	return 1;
+
+ fail_range:
+	DUK_DCERROR_RANGE_INVALID_ARGS((duk_hthread *) ctx);
+}
+#endif  /* DUK_USE_ES6 */
 
 DUK_INTERNAL duk_ret_t duk_bi_string_prototype_locale_compare(duk_context *ctx) {
 	duk_hstring *h1;

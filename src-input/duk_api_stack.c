@@ -1605,6 +1605,16 @@ DUK_EXTERNAL void duk_require_function(duk_context *ctx, duk_idx_t idx) {
 	}
 }
 
+DUK_INTERNAL_DECL void duk_require_constructable(duk_context *ctx, duk_idx_t idx) {
+	duk_hobject *h;
+
+	h = duk_require_hobject_accept_mask(ctx, idx, DUK_TYPE_MASK_LIGHTFUNC);
+	if (h != NULL && !DUK_HOBJECT_HAS_CONSTRUCTABLE(h)) {
+		DUK_ERROR_REQUIRE_TYPE_INDEX((duk_hthread *) ctx, idx, "constructable", DUK_STR_NOT_CONSTRUCTABLE);
+	}
+	/* Lightfuncs (h == NULL) are constructable. */
+}
+
 DUK_EXTERNAL duk_context *duk_get_context(duk_context *ctx, duk_idx_t idx) {
 	DUK_ASSERT_CTX_VALID(ctx);
 
@@ -1785,6 +1795,60 @@ DUK_EXTERNAL duk_size_t duk_get_length(duk_context *ctx, duk_idx_t idx) {
 	}
 
 	DUK_UNREACHABLE();
+}
+
+
+/*
+ *  duk_known_xxx() helpers
+ *
+ *  Used internally when we're 100% sure that a certain index is valid and
+ *  contains an object of a certain type.  For example, if we duk_push_object()
+ *  we can then safely duk_known_hobject(ctx, -1).  These helpers just assert
+ *  for the index and type, and if the assumptions are not valid, memory unsafe
+ *  behavior happens.
+ */
+
+DUK_LOCAL duk_heaphdr *duk__known_heaphdr(duk_context *ctx, duk_idx_t idx) {
+	duk_hthread *thr = (duk_hthread *) ctx;
+	duk_tval *tv;
+	duk_heaphdr *h;
+
+	DUK_ASSERT_CTX_VALID(ctx);
+	if (idx < 0) {
+		tv = thr->valstack_top + idx;
+	} else {
+		tv = thr->valstack_bottom + idx;
+	}
+	DUK_ASSERT(tv >= thr->valstack_bottom);
+	DUK_ASSERT(tv < thr->valstack_top);
+	h = DUK_TVAL_GET_HEAPHDR(tv);
+	DUK_ASSERT(h != NULL);
+	return h;
+}
+
+DUK_INTERNAL duk_hstring *duk_known_hstring(duk_context *ctx, duk_idx_t idx) {
+	DUK_ASSERT(duk_get_hstring(ctx, idx) != NULL);
+	return (duk_hstring *) duk__known_heaphdr(ctx, idx);
+}
+
+DUK_INTERNAL duk_hobject *duk_known_hobject(duk_context *ctx, duk_idx_t idx) {
+	DUK_ASSERT(duk_get_hobject(ctx, idx) != NULL);
+	return (duk_hobject *) duk__known_heaphdr(ctx, idx);
+}
+
+DUK_INTERNAL duk_hbuffer *duk_known_hbuffer(duk_context *ctx, duk_idx_t idx) {
+	DUK_ASSERT(duk_get_hbuffer(ctx, idx) != NULL);
+	return (duk_hbuffer *) duk__known_heaphdr(ctx, idx);
+}
+
+DUK_INTERNAL duk_hcompfunc *duk_known_hcompfunc(duk_context *ctx, duk_idx_t idx) {
+	DUK_ASSERT(duk_get_hcompfunc(ctx, idx) != NULL);
+	return (duk_hcompfunc *) duk__known_heaphdr(ctx, idx);
+}
+
+DUK_INTERNAL duk_hnatfunc *duk_known_hnatfunc(duk_context *ctx, duk_idx_t idx) {
+	DUK_ASSERT(duk_get_hnatfunc(ctx, idx) != NULL);
+	return (duk_hnatfunc *) duk__known_heaphdr(ctx, idx);
 }
 
 DUK_INTERNAL void duk_set_length(duk_context *ctx, duk_idx_t idx, duk_size_t length) {
@@ -2134,7 +2198,7 @@ DUK_INTERNAL duk_hstring *duk_safe_to_hstring(duk_context *ctx, duk_idx_t idx) {
 	(void) duk_safe_to_string(ctx, idx);
 	DUK_ASSERT(duk_is_string(ctx, idx));
 	DUK_ASSERT(duk_get_hstring(ctx, idx) != NULL);
-	return duk_get_hstring(ctx, idx);
+	return duk_known_hstring(ctx, idx);
 }
 #endif
 
@@ -2531,8 +2595,7 @@ DUK_LOCAL void duk__push_func_from_lightfunc(duk_context *ctx, duk_c_function fu
 	duk_push_lightfunc_name_raw(ctx, func, lf_flags);
 	duk_xdef_prop_stridx(ctx, -2, DUK_STRIDX_NAME, DUK_PROPDESC_FLAGS_NONE);
 
-	nf = duk_get_hnatfunc(ctx, -1);
-	DUK_ASSERT(nf != NULL);
+	nf = duk_known_hnatfunc(ctx, -1);
 	nf->magic = (duk_int16_t) DUK_LFUNC_FLAGS_GET_MAGIC(lf_flags);
 
 	/* Enable DUKFUNC exotic behavior once properties are set up. */
@@ -2653,8 +2716,7 @@ DUK_INTERNAL duk_hobject *duk_to_hobject(duk_context *ctx, duk_idx_t idx) {
 	duk_hobject *ret;
 	DUK_ASSERT_CTX_VALID(ctx);
 	duk_to_object(ctx, idx);
-	ret = duk_get_hobject(ctx, idx);
-	DUK_ASSERT(ret != NULL);
+	ret = duk_known_hobject(ctx, idx);
 	return ret;
 }
 
@@ -2875,6 +2937,8 @@ DUK_EXTERNAL duk_bool_t duk_is_nan(duk_context *ctx, duk_idx_t idx) {
 
 	tv = duk_get_tval_or_unused(ctx, idx);
 	DUK_ASSERT(tv != NULL);
+
+	/* XXX: for packed duk_tval an explicit "is number" check is unnecessary */
 	if (!DUK_TVAL_IS_NUMBER(tv)) {
 		return 0;
 	}
@@ -3353,15 +3417,10 @@ DUK_INTERNAL duk_hobject *duk_push_this_coercible_to_object(duk_context *ctx) {
 }
 
 DUK_INTERNAL duk_hstring *duk_push_this_coercible_to_string(duk_context *ctx) {
-	duk_hstring *h;
-
 	DUK_ASSERT_CTX_VALID(ctx);
 
 	duk__push_this_helper(ctx, 1 /*check_object_coercible*/);
-	duk_to_string(ctx, -1);
-	h = duk_get_hstring(ctx, -1);
-	DUK_ASSERT(h != NULL);
-	return h;
+	return duk_to_hstring(ctx, -1);
 }
 
 DUK_INTERNAL duk_tval *duk_get_borrowed_this_tval(duk_context *ctx) {
@@ -3599,8 +3658,7 @@ DUK_INTERNAL duk_idx_t duk_push_object_helper_proto(duk_context *ctx, duk_uint_t
 	DUK_ASSERT_CTX_VALID(ctx);
 
 	ret = duk_push_object_helper(ctx, hobject_flags_and_class, -1);
-	h = duk_get_hobject(ctx, -1);
-	DUK_ASSERT(h != NULL);
+	h = duk_known_hobject(ctx, -1);
 	DUK_ASSERT(DUK_HOBJECT_GET_PROTOTYPE(thr->heap, h) == NULL);
 	DUK_HOBJECT_SET_PROTOTYPE_UPDREF(thr, h, proto);
 	return ret;
@@ -4473,7 +4531,7 @@ DUK_INTERNAL void duk_unpack(duk_context *ctx) {
  *  Error throwing
  */
 
-DUK_EXTERNAL void duk_throw(duk_context *ctx) {
+DUK_EXTERNAL void duk_throw_raw(duk_context *ctx) {
 	duk_hthread *thr = (duk_hthread *) ctx;
 
 	DUK_ASSERT(thr->valstack_bottom >= thr->valstack);
@@ -4512,7 +4570,7 @@ DUK_EXTERNAL void duk_throw(duk_context *ctx) {
 	DUK_UNREACHABLE();
 }
 
-DUK_EXTERNAL void duk_fatal(duk_context *ctx, const char *err_msg) {
+DUK_EXTERNAL void duk_fatal_raw(duk_context *ctx, const char *err_msg) {
 	duk_hthread *thr = (duk_hthread *) ctx;
 
 	DUK_ASSERT_CTX_VALID(ctx);
@@ -4542,7 +4600,7 @@ DUK_EXTERNAL void duk_error_va_raw(duk_context *ctx, duk_errcode_t err_code, con
 	DUK_ASSERT_CTX_VALID(ctx);
 
 	duk_push_error_object_va_raw(ctx, err_code, filename, line, fmt, ap);
-	duk_throw(ctx);
+	(void) duk_throw(ctx);
 }
 
 DUK_EXTERNAL void duk_error_raw(duk_context *ctx, duk_errcode_t err_code, const char *filename, duk_int_t line, const char *fmt, ...) {
@@ -4553,14 +4611,15 @@ DUK_EXTERNAL void duk_error_raw(duk_context *ctx, duk_errcode_t err_code, const 
 	va_start(ap, fmt);
 	duk_push_error_object_va_raw(ctx, err_code, filename, line, fmt, ap);
 	va_end(ap);
-	duk_throw(ctx);
+	(void) duk_throw(ctx);
 }
 
 #if !defined(DUK_USE_VARIADIC_MACROS)
-DUK_EXTERNAL void duk_error_stash(duk_context *ctx, duk_errcode_t err_code, const char *fmt, ...) {
+DUK_NORETURN(DUK_LOCAL_DECL void duk__throw_error_from_stash(duk_context *ctx, duk_errcode_t err_code, const char *fmt, va_list ap));
+
+DUK_LOCAL void duk__throw_error_from_stash(duk_context *ctx, duk_errcode_t err_code, const char *fmt, va_list ap) {
 	const char *filename;
 	duk_int_t line;
-	va_list ap;
 
 	DUK_ASSERT_CTX_VALID(ctx);
 
@@ -4569,10 +4628,41 @@ DUK_EXTERNAL void duk_error_stash(duk_context *ctx, duk_errcode_t err_code, cons
 	duk_api_global_filename = NULL;
 	duk_api_global_line = 0;
 
-	va_start(ap, fmt);
 	duk_push_error_object_va_raw(ctx, err_code, filename, line, fmt, ap);
-	va_end(ap);
-	duk_throw(ctx);
+	(void) duk_throw(ctx);
+}
+
+#define DUK__ERROR_STASH_SHARED(code) do { \
+		va_list ap; \
+		va_start(ap, fmt); \
+		duk__throw_error_from_stash(ctx, (code), fmt, ap); \
+		va_end(ap); \
+		/* Never reached; if return 0 here, gcc/clang will complain. */ \
+	} while (0)
+
+DUK_EXTERNAL duk_ret_t duk_error_stash(duk_context *ctx, duk_errcode_t err_code, const char *fmt, ...) {
+	DUK__ERROR_STASH_SHARED(err_code);
+}
+DUK_EXTERNAL duk_ret_t duk_generic_error_stash(duk_context *ctx, const char *fmt, ...) {
+	DUK__ERROR_STASH_SHARED(DUK_ERR_ERROR);
+}
+DUK_EXTERNAL duk_ret_t duk_eval_error_stash(duk_context *ctx, const char *fmt, ...) {
+	DUK__ERROR_STASH_SHARED(DUK_ERR_EVAL_ERROR);
+}
+DUK_EXTERNAL duk_ret_t duk_range_error_stash(duk_context *ctx, const char *fmt, ...) {
+	DUK__ERROR_STASH_SHARED(DUK_ERR_RANGE_ERROR);
+}
+DUK_EXTERNAL duk_ret_t duk_reference_error_stash(duk_context *ctx, const char *fmt, ...) {
+	DUK__ERROR_STASH_SHARED(DUK_ERR_REFERENCE_ERROR);
+}
+DUK_EXTERNAL duk_ret_t duk_syntax_error_stash(duk_context *ctx, const char *fmt, ...) {
+	DUK__ERROR_STASH_SHARED(DUK_ERR_SYNTAX_ERROR);
+}
+DUK_EXTERNAL duk_ret_t duk_type_error_stash(duk_context *ctx, const char *fmt, ...) {
+	DUK__ERROR_STASH_SHARED(DUK_ERR_TYPE_ERROR);
+}
+DUK_EXTERNAL duk_ret_t duk_uri_error_stash(duk_context *ctx, const char *fmt, ...) {
+	DUK__ERROR_STASH_SHARED(DUK_ERR_URI_ERROR);
 }
 #endif  /* DUK_USE_VARIADIC_MACROS */
 

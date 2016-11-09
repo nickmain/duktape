@@ -45,6 +45,8 @@ DUK_USE_STRTAB_CHAIN: true
 DUK_USE_STRTAB_PROBE: false
 DUK_USE_STRTAB_CHAIN_SIZE: 128
 
+DUK_USE_HSTRING_ARRIDX: false
+
 # Consider using pointer compression, see doc/low-memory.rst.
 #DUK_USE_REFCOUNT16: true
 #DUK_USE_STRHASH16: true
@@ -91,3 +93,6 @@ DUK_USE_SOURCE_NONBMP: false  # <300 bytes footprint
 DUK_USE_ES6_PROXY: false  # roughly 2kB footprint
 DUK_USE_ES7_EXP_OPERATOR: false  # pulls in pow()
 DUK_USE_ENCODING_BUILTINS: false
+DUK_USE_ES6_UNICODE_ESCAPE: false
+DUK_USE_REFLECT_BUILTIN: false
+DUK_USE_ES6: false

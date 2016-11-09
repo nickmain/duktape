@@ -32,6 +32,20 @@ the following non-standard semantics:</p>
 <p>Computed property names are supported and allow syntax like
 <code>{ [1 + 2]: "three" }</code>.</p>
 
+<h2 id="es6-number-literals">Octal and binary number literals</h2>
+
+<p>The <code>0o755</code> and <code>0b10001010</code> literal formats
+are supported.  Legacy octal literals like <code>0755</code> are also
+supported.</p>
+
+<h2 id="es6-unicode-escape">\u{H+} escape syntax</h2>
+
+<p>The <code>\u{H+}</code> escape syntax is supported in source code string
+literals and identifier names.  Codepoints above non-BMP, for example
+<code>\u{1f4a9}</code>, are decoded into surrogate pairs during parsing.
+RegExps don't yet support this escape format as it requires currently
+unsupported RegExp Unicode mode (<code>/u</code>).</p>
+
 <h2 id="es6-proto">Object.setPrototypeOf and Object.prototype.__proto__</h2>
 
 <p><a href="http://www.ecma-international.org/ecma-262/6.0/index.html#sec-object.setprototypeof">Object.setPrototypeOf</a>
@@ -42,6 +56,15 @@ an accessor property (setter/getter) which provides the same functionality
 but is compatible with existing code base which has relied on a non-standard
 <code>__proto__</code> property for a while.  Duktape does not support the
 <a href="http://www.ecma-international.org/ecma-262/6.0/index.html#sec-__proto__-property-names-in-object-initializers">__proto__ property name in an object initializer</a>.</p>
+
+<h2 id="es6-reflect">Reflect built-in</h2>
+
+<p>The <code>Reflect</code> built-in provides access to several fundamental
+Ecmascript primitives as function calls.  For example, <code>Reflect.has()</code>
+works like the <code>in</code> operator, and <code>Reflect.construct()</code>
+is like <code>new</code>.  It also serves as a namespace for several functions
+previously exposed through <code>Object</code>, such as
+<code>Reflect.defineProperty()</code>.</p>
 
 <h2 id="es6-proxy">Proxy object (subset)</h2>
 
@@ -95,3 +118,14 @@ ES6.  The following traps are implemented:</p>
 
 <p>Duktape implements Khronos typed array support which is a subset of ES6
 typed arrays.</p>
+
+<h2 id="es6-enum-order">Enumeration order</h2>
+
+<p><code>Object.getOwnPropertyNames()</code> follows the
+<a href="http://www.ecma-international.org/ecma-262/6.0/#sec-ordinary-object-internal-methods-and-internal-slots-ownpropertykeys">ES6 [[OwnPropertyKeys]]</a>
+enumeration order: (1) array indices in ascending order, (2) other properties
+in insertion order, (3) symbols in insertion order.  While ES6 or ES7 doesn't
+require it, Duktape follows this same order also for <code>for-in</code>,
+<code>Object.keys()</code>, and <code>duk_enum()</code> in general.  As in V8,
+the rule is applied for every "inheritance level" in turn, i.e. inherited
+non-duplicate properties always follow child properties.</p>

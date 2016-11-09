@@ -127,9 +127,8 @@ DUK_LOCAL void duk__append_i32(duk_re_compiler_ctx *re_ctx, duk_int32_t x) {
 /* special helper for emitting u16 lists (used for character ranges for built-in char classes) */
 DUK_LOCAL void duk__append_u16_list(duk_re_compiler_ctx *re_ctx, const duk_uint16_t *values, duk_uint32_t count) {
 	/* Call sites don't need the result length so it's not accumulated. */
-	while (count > 0) {
+	while (count-- > 0) {
 		duk__append_u32(re_ctx, (duk_uint32_t) (*values++));
-		count--;
 	}
 }
 
@@ -159,17 +158,66 @@ DUK_LOCAL void duk__remove_slice(duk_re_compiler_ctx *re_ctx, duk_uint32_t data_
  *  variable length UTF-8 encoding.  See doc/regexp.rst for discussion.
  */
 DUK_LOCAL duk_uint32_t duk__insert_jump_offset(duk_re_compiler_ctx *re_ctx, duk_uint32_t offset, duk_int32_t skip) {
-	duk_small_int_t len;
-
-	/* XXX: solve into closed form (smaller code) */
-
+#if 0
+	/* Iterative solution. */
 	if (skip < 0) {
+		duk_small_int_t len;
 		/* two encoding attempts suffices */
 		len = duk_unicode_get_xutf8_length((duk_codepoint_t) duk__encode_i32(skip));
 		len = duk_unicode_get_xutf8_length((duk_codepoint_t) duk__encode_i32(skip - (duk_int32_t) len));
 		DUK_ASSERT(duk_unicode_get_xutf8_length(duk__encode_i32(skip - (duk_int32_t) len)) == len);  /* no change */
 		skip -= (duk_int32_t) len;
 	}
+#endif
+
+#if defined(DUK_USE_PREFER_SIZE)
+	/* Closed form solution, this produces smallest code.
+	 * See re_neg_jump_offset (closed2).
+	 */
+	if (skip < 0) {
+		skip--;
+		if (skip < -0x3fL) {
+			skip--;
+		}
+		if (skip < -0x3ffL) {
+			skip--;
+		}
+		if (skip < -0x7fffL) {
+			skip--;
+		}
+		if (skip < -0xfffffL) {
+			skip--;
+		}
+		if (skip < -0x1ffffffL) {
+			skip--;
+		}
+		if (skip < -0x3fffffffL) {
+			skip--;
+		}
+	}
+#else  /* DUK_USE_PREFER_SIZE */
+	/* Closed form solution, this produces fastest code.
+	 * See re_neg_jump_offset (closed1).
+	 */
+	if (skip < 0) {
+		if (skip >= -0x3eL) {
+			skip -= 1;
+		} else if (skip >= -0x3fdL) {
+			skip -= 2;
+		} else if (skip >= -0x7ffcL) {
+			skip -= 3;
+		} else if (skip >= -0xffffbL) {
+			skip -= 4;
+		} else if (skip >= -0x1fffffaL) {
+			skip -= 5;
+		} else if (skip >= -0x3ffffff9L) {
+			skip -= 6;
+		} else {
+			skip -= 7;
+		}
+	}
+#endif  /* DUK_USE_PREFER_SIZE */
+
 	return duk__insert_i32(re_ctx, offset, skip);
 }
 
@@ -614,6 +662,12 @@ DUK_LOCAL void duk__parse_disjunction(duk_re_compiler_ctx *re_ctx, duk_bool_t ex
 			/* Note: successive characters could be joined into string matches
 			 * but this is not trivial (consider e.g. '/xyz+/); see docs for
 			 * more discussion.
+			 *
+			 * No support for \u{H+} yet.  While only BMP Unicode escapes are
+			 * supported for RegExps at present, 'ch' may still be a non-BMP
+			 * codepoint if it is decoded straight from source text UTF-8.
+			 * There's no non-BMP support yet so this is handled simply by
+			 * matching the non-BMP character (which is custom behavior).
 			 */
 			duk_uint32_t ch;
 
@@ -872,8 +926,7 @@ DUK_LOCAL void duk__create_escaped_source(duk_hthread *thr, int idx_pattern) {
 	duk_size_t i, n;
 	duk_uint_fast8_t c_prev, c;
 
-	h = duk_get_hstring(ctx, idx_pattern);
-	DUK_ASSERT(h != NULL);
+	h = duk_known_hstring(ctx, idx_pattern);
 	p = (const duk_uint8_t *) DUK_HSTRING_GET_DATA(h);
 	n = (duk_size_t) DUK_HSTRING_GET_BYTELEN(h);
 
@@ -1052,7 +1105,7 @@ DUK_INTERNAL void duk_regexp_create_instance(duk_hthread *thr) {
 
 	/* [ ... escape_source bytecode ] */
 
-	h_bc = duk_get_hstring(ctx, -1);
+	h_bc = duk_require_hstring(ctx, -1);
 	DUK_ASSERT(h_bc != NULL);
 	DUK_ASSERT(DUK_HSTRING_GET_BYTELEN(h_bc) >= 1);          /* always at least the header */
 	DUK_ASSERT(DUK_HSTRING_GET_CHARLEN(h_bc) >= 1);
@@ -1062,8 +1115,7 @@ DUK_INTERNAL void duk_regexp_create_instance(duk_hthread *thr) {
 	/* [ ... escaped_source bytecode ] */
 
 	duk_push_object(ctx);
-	h = duk_get_hobject(ctx, -1);
-	DUK_ASSERT(h != NULL);
+	h = duk_known_hobject(ctx, -1);
 	duk_insert(ctx, -3);
 
 	/* [ ... regexp_object escaped_source bytecode ] */

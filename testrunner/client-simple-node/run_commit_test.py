@@ -215,6 +215,9 @@ def context_helper_x64_qecmatest(env=None, genconfig_opts=[], valgrind=False):
 def context_linux_x64_qecmatest():
     return context_helper_x64_qecmatest(env=newenv())
 
+def context_linux_arm_qecmatest():
+    return context_helper_x64_qecmatest(env=newenv())  # no difference to x64 now
+
 def context_linux_x64_qecmatest_assert():
     return context_helper_x64_qecmatest(env=newenv(), genconfig_opts=[ '-DDUK_USE_ASSERTIONS' ])
 
@@ -245,6 +248,9 @@ def context_helper_x64_apitest(env=None, genconfig_opts=[], valgrind=False):
 
 def context_linux_x64_apitest():
     return context_helper_x64_apitest(env=newenv())
+
+def context_linux_arm_apitest():
+    return context_helper_x64_apitest(env=newenv())  # no difference to x64 now
 
 def context_linux_x64_apitest_assert():
     return context_helper_x64_apitest(env=newenv(), genconfig_opts=[ '-DDUK_USE_ASSERTIONS' ])
@@ -735,7 +741,8 @@ def context_helper_hello_ram(archopt):
     kb_rom = test([
         '-DDUK_USE_ROM_OBJECTS',
         '-DDUK_USE_ROM_STRINGS',
-        '-DDUK_USE_ROM_GLOBAL_INHERIT'
+        '-DDUK_USE_ROM_GLOBAL_INHERIT',
+        '-UDUK_USE_HSTRING_ARRIDX'
     ])
 
     set_output_description('%s %s %s (kB)' % (kb_default, kb_nobufobj, kb_rom))
@@ -881,10 +888,12 @@ context_handlers = {
 
     'codepolicycheck': context_codepolicycheck,
     'linux-x64-qecmatest': context_linux_x64_qecmatest,
+    'linux-arm-qecmatest': context_linux_arm_qecmatest,
     'linux-x64-qecmatest-assert': context_linux_x64_qecmatest_assert,
     'linux-x64-qecmatest-valgrind': context_linux_x64_qecmatest_valgrind,
     # XXX: torture options
     'linux-x64-apitest': context_linux_x64_apitest,
+    'linux-arm-apitest': context_linux_x64_apitest,
     'linux-x64-apitest-assert': context_linux_x64_apitest_assert,
     'linux-x64-apitest-valgrind': context_linux_x64_apitest_valgrind,
     'linux-x64-test262test': context_linux_x64_test262test,
