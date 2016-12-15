@@ -73,11 +73,7 @@ DUK_LOCAL double duk__fmin_fixed(double x, double y) {
 			return +0.0;
 		}
 	}
-#ifdef DUK_USE_MATH_FMIN
-	return DUK_FMIN(x, y);
-#else
-	return (x < y ? x : y);
-#endif
+	return duk_double_fmin(x, y);
 }
 
 DUK_LOCAL double duk__fmax_fixed(double x, double y) {
@@ -91,12 +87,61 @@ DUK_LOCAL double duk__fmax_fixed(double x, double y) {
 			return -0.0;
 		}
 	}
-#ifdef DUK_USE_MATH_FMAX
-	return DUK_FMAX(x, y);
+	return duk_double_fmax(x, y);
+}
+
+#if defined(DUK_USE_ES6)
+DUK_LOCAL double duk__cbrt(double x) {
+	/* cbrt() is C99.  To avoid hassling embedders with the need to provide a
+	 * cube root function, we can get by with pow().  The result is not
+	 * identical, but that's OK: ES6 says it's implementation-dependent.
+	 */
+
+#if defined(DUK_CBRT)
+	/* cbrt() matches ES6 requirements. */
+	return DUK_CBRT(x);
 #else
-	return (x > y ? x : y);
+	duk_small_int_t c = (duk_small_int_t) DUK_FPCLASSIFY(x);
+
+	/* pow() does not, however. */
+	if (c == DUK_FP_NAN || c == DUK_FP_INFINITE || c == DUK_FP_ZERO) {
+		return x;
+	}
+	if (DUK_SIGNBIT(x)) {
+		return -DUK_POW(-x, 1.0 / 3.0);
+	} else {
+		return DUK_POW(x, 1.0 / 3.0);
+	}
 #endif
 }
+
+DUK_LOCAL double duk__log2(double x) {
+#if defined(DUK_LOG2)
+	return DUK_LOG2(x);
+#else
+	return DUK_LOG(x) * DUK_DOUBLE_LOG2E;
+#endif
+}
+
+DUK_LOCAL double duk__log10(double x) {
+#if defined(DUK_LOG10)
+	return DUK_LOG10(x);
+#else
+	return DUK_LOG(x) * DUK_DOUBLE_LOG10E;
+#endif
+}
+
+DUK_LOCAL double duk__trunc(double x) {
+#if defined(DUK_TRUNC)
+	return DUK_TRUNC(x);
+#else
+	/* Handles -0 correctly: -0.0 matches 'x >= 0.0' but floor()
+	 * is required to return -0 when the argument is -0.
+	 */
+	return x >= 0.0 ? DUK_FLOOR(x) : DUK_CEIL(x);
+#endif
+}
+#endif  /* DUK_USE_ES6 */
 
 DUK_LOCAL double duk__round_fixed(double x) {
 	/* Numbers half-way between integers must be rounded towards +Infinity,
@@ -180,7 +225,34 @@ DUK_LOCAL double duk__sqrt(double x) {
 DUK_LOCAL double duk__tan(double x) {
 	return DUK_TAN(x);
 }
-DUK_LOCAL double duk__atan2(double x, double y) {
+DUK_LOCAL double duk__atan2_fixed(double x, double y) {
+#if defined(DUK_USE_ATAN2_WORKAROUNDS)
+	/* Specific fixes to common atan2() implementation issues:
+	 * - test-bug-mingw-math-issues.js
+	 */
+	if (DUK_ISINF(x) && DUK_ISINF(y)) {
+		if (DUK_SIGNBIT(x)) {
+			if (DUK_SIGNBIT(y)) {
+				return -2.356194490192345;
+			} else {
+				return -0.7853981633974483;
+			}
+		} else {
+			if (DUK_SIGNBIT(y)) {
+				return 2.356194490192345;
+			} else {
+				return 0.7853981633974483;
+			}
+		}
+	}
+#else
+	/* Some ISO C assumptions. */
+	DUK_ASSERT(DUK_ATAN2(DUK_DOUBLE_INFINITY, DUK_DOUBLE_INFINITY) == 0.7853981633974483);
+	DUK_ASSERT(DUK_ATAN2(-DUK_DOUBLE_INFINITY, DUK_DOUBLE_INFINITY) == -0.7853981633974483);
+	DUK_ASSERT(DUK_ATAN2(DUK_DOUBLE_INFINITY, -DUK_DOUBLE_INFINITY) == 2.356194490192345);
+	DUK_ASSERT(DUK_ATAN2(-DUK_DOUBLE_INFINITY, -DUK_DOUBLE_INFINITY) == -2.356194490192345);
+#endif
+
 	return DUK_ATAN2(x, y);
 }
 #endif  /* DUK_USE_AVOID_PLATFORM_FUNCPTRS */
@@ -200,8 +272,14 @@ DUK_LOCAL const duk__one_arg_func duk__one_arg_funcs[] = {
 	duk__round_fixed,
 	duk__sin,
 	duk__sqrt,
-	duk__tan
-#else
+	duk__tan,
+#if defined(DUK_USE_ES6)
+	duk__cbrt,
+	duk__log2,
+	duk__log10,
+	duk__trunc
+#endif
+#else  /* DUK_USE_AVOID_PLATFORM_FUNCPTRS */
 	DUK_FABS,
 	DUK_ACOS,
 	DUK_ASIN,
@@ -214,17 +292,23 @@ DUK_LOCAL const duk__one_arg_func duk__one_arg_funcs[] = {
 	duk__round_fixed,
 	DUK_SIN,
 	DUK_SQRT,
-	DUK_TAN
+	DUK_TAN,
+#if defined(DUK_USE_ES6)
+	duk__cbrt,
+	duk__log2,
+	duk__log10,
+	duk__trunc
 #endif
+#endif  /* DUK_USE_AVOID_PLATFORM_FUNCPTRS */
 };
 
 /* order must match constants in genbuiltins.py */
 DUK_LOCAL const duk__two_arg_func duk__two_arg_funcs[] = {
 #if defined(DUK_USE_AVOID_PLATFORM_FUNCPTRS)
-	duk__atan2,
+	duk__atan2_fixed,
 	duk_js_arith_pow
 #else
-	DUK_ATAN2,
+	duk__atan2_fixed,
 	duk_js_arith_pow
 #endif
 };
@@ -269,5 +353,73 @@ DUK_INTERNAL duk_ret_t duk_bi_math_object_random(duk_context *ctx) {
 	duk_push_number(ctx, (duk_double_t) DUK_UTIL_GET_RANDOM_DOUBLE((duk_hthread *) ctx));
 	return 1;
 }
+
+#if defined(DUK_USE_ES6)
+DUK_INTERNAL duk_ret_t duk_bi_math_object_hypot(duk_context *ctx) {
+	/*
+	 *  E6 Section 20.2.2.18: Math.hypot
+	 *
+	 *  - If no arguments are passed, the result is +0.
+	 *  - If any argument is +inf, the result is +inf.
+	 *  - If any argument is -inf, the result is +inf.
+	 *  - If no argument is +inf or -inf, and any argument is NaN, the result is
+	 *    NaN.
+	 *  - If all arguments are either +0 or -0, the result is +0.
+	 */
+
+	duk_idx_t nargs;
+	duk_idx_t i;
+	duk_bool_t found_nan;
+	duk_double_t max;
+	duk_double_t sum, summand;
+	duk_double_t comp, prelim;
+	duk_double_t t;
+
+	nargs = duk_get_top(ctx);
+
+	/* Find the highest value.  Also ToNumber() coerces. */
+	max = 0.0;
+	found_nan = 0;
+	for (i = 0; i < nargs; i++) {
+		t = DUK_FABS(duk_to_number(ctx, i));
+		if (DUK_FPCLASSIFY(t) == DUK_FP_NAN) {
+			found_nan = 1;
+		} else {
+			max = duk_double_fmax(max, t);
+		}
+	}
+
+	/* Early return cases. */
+	if (max == DUK_DOUBLE_INFINITY) {
+		duk_push_number(ctx, DUK_DOUBLE_INFINITY);
+		return 1;
+	} else if (found_nan) {
+		duk_push_number(ctx, DUK_DOUBLE_NAN);
+		return 1;
+	} else if (max == 0.0) {
+		duk_push_number(ctx, 0.0);
+		/* Otherwise we'd divide by zero. */
+		return 1;
+	}
+
+	/* Use Kahan summation and normalize to the highest value to minimize
+	 * floating point rounding error and avoid overflow.
+	 *
+	 * https://en.wikipedia.org/wiki/Kahan_summation_algorithm
+	 */
+	sum = 0.0;
+	comp = 0.0;
+	for (i = 0; i < nargs; i++) {
+		t = DUK_FABS(duk_get_number(ctx, i)) / max;
+		summand = (t * t) - comp;
+		prelim = sum + summand;
+		comp = (prelim - sum) - summand;
+		sum = prelim;
+	}
+
+	duk_push_number(ctx, (duk_double_t) DUK_SQRT(sum) * max);
+	return 1;
+}
+#endif  /* DUK_USE_ES6 */
 
 #endif  /* DUK_USE_MATH_BUILTIN */

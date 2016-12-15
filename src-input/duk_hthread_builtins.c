@@ -10,25 +10,12 @@
  *  Encoding constants, must match genbuiltins.py
  */
 
-#define DUK__CLASS_BITS                  5
-#define DUK__BIDX_BITS                   7
-#define DUK__STRIDX_BITS                 9  /* XXX: try to optimize to 8 (would now be possible, <200 used) */
-#define DUK__NATIDX_BITS                 8
-#define DUK__NUM_NORMAL_PROPS_BITS       6
-#define DUK__NUM_FUNC_PROPS_BITS         6
 #define DUK__PROP_FLAGS_BITS             3
-#define DUK__STRING_LENGTH_BITS          8
-#define DUK__STRING_CHAR_BITS            7
 #define DUK__LENGTH_PROP_BITS            3
 #define DUK__NARGS_BITS                  3
 #define DUK__PROP_TYPE_BITS              3
-#define DUK__MAGIC_BITS                  16
-#define DUK__ACCESSOR_MAGIC_BITS         2      /* just a few shared accessors now */
 
 #define DUK__NARGS_VARARGS_MARKER        0x07
-#define DUK__NO_CLASS_MARKER             0x00   /* 0 = DUK_HOBJECT_CLASS_NONE */
-#define DUK__NO_BIDX_MARKER              0x7f
-#define DUK__NO_STRIDX_MARKER            0xff
 
 #define DUK__PROP_TYPE_DOUBLE            0
 #define DUK__PROP_TYPE_STRING            1
@@ -61,21 +48,21 @@ DUK_LOCAL void duk__duplicate_ram_global_object(duk_hthread *thr) {
 
 #if defined(DUK_USE_ROM_GLOBAL_INHERIT)
 	/* Inherit from ROM-based global object: less RAM usage, less transparent. */
-	duk_push_object_helper(ctx,
-	                       DUK_HOBJECT_FLAG_EXTENSIBLE |
-	                       DUK_HOBJECT_CLASS_AS_FLAGS(DUK_HOBJECT_CLASS_GLOBAL),
-	                       DUK_BIDX_GLOBAL);
-	h1 = duk_known_hobject(ctx, -1);
+	h1 = duk_push_object_helper(ctx,
+	                            DUK_HOBJECT_FLAG_EXTENSIBLE |
+	                            DUK_HOBJECT_CLASS_AS_FLAGS(DUK_HOBJECT_CLASS_GLOBAL),
+	                            DUK_BIDX_GLOBAL);
+	DUK_ASSERT(h1 != NULL);
 #elif defined(DUK_USE_ROM_GLOBAL_CLONE)
 	/* Clone the properties of the ROM-based global object to create a
 	 * fully RAM-based global object.  Uses more memory than the inherit
 	 * model but more compliant.
 	 */
-	duk_push_object_helper(ctx,
-	                       DUK_HOBJECT_FLAG_EXTENSIBLE |
-	                       DUK_HOBJECT_CLASS_AS_FLAGS(DUK_HOBJECT_CLASS_GLOBAL),
-	                       DUK_BIDX_OBJECT_PROTOTYPE);
-	h1 = duk_known_hobject(ctx, -1);
+	h1 = duk_push_object_helper(ctx,
+	                            DUK_HOBJECT_FLAG_EXTENSIBLE |
+	                            DUK_HOBJECT_CLASS_AS_FLAGS(DUK_HOBJECT_CLASS_GLOBAL),
+	                            DUK_BIDX_OBJECT_PROTOTYPE);
+	DUK_ASSERT(h1 != NULL);
 	h2 = thr->builtins[DUK_BIDX_GLOBAL];
 	DUK_ASSERT(h2 != NULL);
 
@@ -120,15 +107,15 @@ DUK_LOCAL void duk__duplicate_ram_global_object(duk_hthread *thr) {
 	 * needed so that the global scope points to the newly created RAM-based
 	 * global object.
 	 */
-	duk_push_object_helper(ctx,
-	                       DUK_HOBJECT_FLAG_EXTENSIBLE |
-	                       DUK_HOBJECT_CLASS_AS_FLAGS(DUK_HOBJECT_CLASS_OBJENV),
-	                       -1);  /* no prototype */
-	h1 = duk_known_hobject(ctx, -1);
+	h1 = duk_push_object_helper(ctx,
+	                            DUK_HOBJECT_FLAG_EXTENSIBLE |
+	                            DUK_HOBJECT_CLASS_AS_FLAGS(DUK_HOBJECT_CLASS_OBJENV),
+	                            -1);  /* no prototype */
+	DUK_ASSERT(h1 != NULL);
 	duk_dup_m2(ctx);
 	duk_dup_top(ctx);  /* -> [ ... new_global new_globalenv new_global new_global ] */
-	duk_xdef_prop_stridx(thr, -3, DUK_STRIDX_INT_TARGET, DUK_PROPDESC_FLAGS_NONE);
-	duk_xdef_prop_stridx(thr, -2, DUK_STRIDX_INT_THIS, DUK_PROPDESC_FLAGS_NONE);  /* always provideThis=true */
+	duk_xdef_prop_stridx_short(thr, -3, DUK_STRIDX_INT_TARGET, DUK_PROPDESC_FLAGS_NONE);
+	duk_xdef_prop_stridx_short(thr, -2, DUK_STRIDX_INT_THIS, DUK_PROPDESC_FLAGS_NONE);  /* always provideThis=true */
 
 	duk_hobject_compact_props(thr, h1);
 	DUK_ASSERT(thr->builtins[DUK_BIDX_GLOBAL_ENV] != NULL);
@@ -167,28 +154,31 @@ DUK_INTERNAL void duk_hthread_create_builtin_objects(duk_hthread *thr) {
 DUK_LOCAL void duk__push_stridx(duk_context *ctx, duk_bitdecoder_ctx *bd) {
 	duk_small_uint_t n;
 
-	n = (duk_small_uint_t) duk_bd_decode(bd, DUK__STRIDX_BITS);
+	n = (duk_small_uint_t) duk_bd_decode_varuint(bd);
 	DUK_ASSERT_DISABLE(n >= 0);  /* unsigned */
 	DUK_ASSERT(n < DUK_HEAP_NUM_STRINGS);
 	duk_push_hstring_stridx(ctx, n);
 }
 DUK_LOCAL void duk__push_string(duk_context *ctx, duk_bitdecoder_ctx *bd) {
-	duk_small_uint_t n;
-	duk_small_uint_t i;
-	duk_uint8_t *p;
+	/* XXX: built-ins data could provide a maximum length that is
+	 * actually needed; bitpacked max length is now 256 bytes.
+	 */
+	duk_uint8_t tmp[DUK_BD_BITPACKED_STRING_MAXLEN];
+	duk_small_uint_t len;
 
-	n = (duk_small_uint_t) duk_bd_decode(bd, DUK__STRING_LENGTH_BITS);
-	p = (duk_uint8_t *) duk_push_fixed_buffer_nozero(ctx, n);
-	for (i = 0; i < n; i++) {
-		*p++ = (duk_uint8_t) duk_bd_decode(bd, DUK__STRING_CHAR_BITS);
-	}
-	(void) duk_buffer_to_string(ctx, -1);
+	len = duk_bd_decode_bitpacked_string(bd, tmp);
+	duk_push_lstring(ctx, (const char *) tmp, (duk_size_t) len);
 }
 DUK_LOCAL void duk__push_stridx_or_string(duk_context *ctx, duk_bitdecoder_ctx *bd) {
-	if (duk_bd_decode_flag(bd)) {
+	duk_small_uint_t n;
+
+	n = (duk_small_uint_t) duk_bd_decode_varuint(bd);
+	if (n == 0) {
 		duk__push_string(ctx, bd);
 	} else {
-		duk__push_stridx(ctx, bd);
+		n--;
+		DUK_ASSERT(n < DUK_HEAP_NUM_STRINGS);
+		duk_push_hstring_stridx(ctx, n);
 	}
 }
 DUK_LOCAL void duk__push_double(duk_context *ctx, duk_bitdecoder_ctx *bd) {
@@ -239,7 +229,7 @@ DUK_INTERNAL void duk_hthread_create_builtin_objects(duk_hthread *thr) {
 		duk_small_uint_t class_num;
 		duk_small_int_t len = -1;  /* must be signed */
 
-		class_num = (duk_small_uint_t) duk_bd_decode(bd, DUK__CLASS_BITS);
+		class_num = (duk_small_uint_t) duk_bd_decode_varuint(bd);
 		len = (duk_small_int_t) duk_bd_decode_flagged(bd, DUK__LENGTH_PROP_BITS, (duk_int32_t) -1 /*def_value*/);
 
 		if (class_num == DUK_HOBJECT_CLASS_FUNCTION) {
@@ -251,7 +241,7 @@ DUK_INTERNAL void duk_hthread_create_builtin_objects(duk_hthread *thr) {
 			DUK_DDD(DUK_DDDPRINT("len=%ld", (long) len));
 			DUK_ASSERT(len >= 0);
 
-			natidx = (duk_small_uint_t) duk_bd_decode(bd, DUK__NATIDX_BITS);
+			natidx = (duk_small_uint_t) duk_bd_decode_varuint(bd);
 			DUK_ASSERT(natidx != 0);
 			c_func = duk_bi_native_functions[natidx];
 			DUK_ASSERT(c_func != NULL);
@@ -274,16 +264,15 @@ DUK_INTERNAL void duk_hthread_create_builtin_objects(duk_hthread *thr) {
 
 			/* XXX: function properties */
 
-			/* Built-in 'name' is not writable by default.  Function '.name'
-			 * is writable to allow user code to set a '.name' on a native
-			 * function.
-			 */
 			duk__push_stridx_or_string(ctx, bd);
-			duk_xdef_prop_stridx(ctx,
-			                     -2,
-			                     DUK_STRIDX_NAME,
-			                     (i == DUK_BIDX_FUNCTION_PROTOTYPE) ?
-			                         DUK_PROPDESC_FLAGS_W : DUK_PROPDESC_FLAGS_NONE);
+#if defined(DUK_USE_FUNC_NAME_PROPERTY)
+			duk_xdef_prop_stridx_short(ctx,
+			                           -2,
+			                           DUK_STRIDX_NAME,
+			                           DUK_PROPDESC_FLAGS_C);
+#else
+			duk_pop(ctx);  /* Not very ideal but good enough for now. */
+#endif
 
 			/* Almost all global level Function objects are constructable
 			 * but not all: Function.prototype is a non-constructable,
@@ -296,14 +285,14 @@ DUK_INTERNAL void duk_hthread_create_builtin_objects(duk_hthread *thr) {
 			}
 
 			/* Cast converts magic to 16-bit signed value */
-			magic = (duk_int16_t) duk_bd_decode_flagged(bd, DUK__MAGIC_BITS, 0 /*def_value*/);
+			magic = (duk_int16_t) duk_bd_decode_varuint(bd);
 			((duk_hnatfunc *) h)->magic = magic;
 		} else if (class_num == DUK_HOBJECT_CLASS_ARRAY) {
 			duk_push_array(ctx);
 		} else {
-			duk_push_object_helper(ctx,
-			                       DUK_HOBJECT_FLAG_EXTENSIBLE,
-			                       -1);  /* no prototype or class yet */
+			(void) duk_push_object_helper(ctx,
+			                              DUK_HOBJECT_FLAG_EXTENSIBLE,
+			                              -1);  /* no prototype or class yet */
 
 		}
 
@@ -316,25 +305,22 @@ DUK_INTERNAL void duk_hthread_create_builtin_objects(duk_hthread *thr) {
 		}
 
 		if (len >= 0) {
-			/*
-			 *  For top-level objects, 'length' property has the following
-			 *  default attributes: non-writable, non-enumerable, non-configurable
-			 *  (E5 Section 15).
+			/* In ES2015+ built-in function object .length property
+			 * has property attributes C (configurable only):
+			 * http://www.ecma-international.org/ecma-262/7.0/#sec-ecmascript-standard-built-in-objects
 			 *
-			 *  However, 'length' property for Array.prototype has attributes
-			 *  expected of an Array instance which are different: writable,
-			 *  non-enumerable, non-configurable (E5 Section 15.4.5.2).
-			 *
-			 *  Because Array .length is virtual, it's not encoded in the init
-			 *  data separately.
+			 * Array.prototype remains an Array instance in ES2015+
+			 * and its length has attributes W (writable only).
+			 * Because .length is now virtual for duk_harray, it is
+			 * not encoded explicitly in init data.
 			 */
 
 			DUK_ASSERT(class_num != DUK_HOBJECT_CLASS_ARRAY);  /* .length is virtual */
 			duk_push_int(ctx, len);
-			duk_xdef_prop_stridx(ctx,
-			                     -2,
-			                     DUK_STRIDX_LENGTH,
-			                     DUK_PROPDESC_FLAGS_NONE);
+			duk_xdef_prop_stridx_short(ctx,
+			                           -2,
+			                           DUK_STRIDX_LENGTH,
+			                           DUK_PROPDESC_FLAGS_C);
 		}
 
 		/* enable exotic behaviors last */
@@ -381,36 +367,39 @@ DUK_INTERNAL void duk_hthread_create_builtin_objects(duk_hthread *thr) {
 		DUK_DDD(DUK_DDDPRINT("initializing built-in object at index %ld", (long) i));
 		h = duk_known_hobject(ctx, i);
 
-		t = (duk_small_uint_t) duk_bd_decode(bd, DUK__BIDX_BITS);
-		if (t != DUK__NO_BIDX_MARKER) {
+		t = (duk_small_uint_t) duk_bd_decode_varuint(bd);
+		if (t > 0) {
+			t--;
 			DUK_DDD(DUK_DDDPRINT("set internal prototype: built-in %ld", (long) t));
 			DUK_HOBJECT_SET_PROTOTYPE_UPDREF(thr, h, duk_known_hobject(ctx, t));
 		}
 
-		t = (duk_small_uint_t) duk_bd_decode(bd, DUK__BIDX_BITS);
-		if (t != DUK__NO_BIDX_MARKER) {
+		t = (duk_small_uint_t) duk_bd_decode_varuint(bd);
+		if (t > 0) {
 			/* 'prototype' property for all built-in objects (which have it) has attributes:
 			 *  [[Writable]] = false,
 			 *  [[Enumerable]] = false,
 			 *  [[Configurable]] = false
 			 */
+			t--;
 			DUK_DDD(DUK_DDDPRINT("set external prototype: built-in %ld", (long) t));
 			duk_xdef_prop_stridx_builtin(ctx, i, DUK_STRIDX_PROTOTYPE, t, DUK_PROPDESC_FLAGS_NONE);
 		}
 
-		t = (duk_small_uint_t) duk_bd_decode(bd, DUK__BIDX_BITS);
-		if (t != DUK__NO_BIDX_MARKER) {
+		t = (duk_small_uint_t) duk_bd_decode_varuint(bd);
+		if (t > 0) {
 			/* 'constructor' property for all built-in objects (which have it) has attributes:
 			 *  [[Writable]] = true,
 			 *  [[Enumerable]] = false,
 			 *  [[Configurable]] = true
 			 */
+			t--;
 			DUK_DDD(DUK_DDDPRINT("set external constructor: built-in %ld", (long) t));
 			duk_xdef_prop_stridx_builtin(ctx, i, DUK_STRIDX_CONSTRUCTOR, t, DUK_PROPDESC_FLAGS_WC);
 		}
 
 		/* normal valued properties */
-		num = (duk_small_uint_t) duk_bd_decode(bd, DUK__NUM_NORMAL_PROPS_BITS);
+		num = (duk_small_uint_t) duk_bd_decode_varuint(bd);
 		DUK_DDD(DUK_DDDPRINT("built-in object %ld, %ld normal valued properties", (long) i, (long) num));
 		for (j = 0; j < num; j++) {
 			duk_small_uint_t defprop_flags;
@@ -463,8 +452,7 @@ DUK_INTERNAL void duk_hthread_create_builtin_objects(duk_hthread *thr) {
 			case DUK__PROP_TYPE_BUILTIN: {
 				duk_small_uint_t bidx;
 
-				bidx = (duk_small_uint_t) duk_bd_decode(bd, DUK__BIDX_BITS);
-				DUK_ASSERT(bidx != DUK__NO_BIDX_MARKER);
+				bidx = (duk_small_uint_t) duk_bd_decode_varuint(bd);
 				duk_dup(ctx, (duk_idx_t) bidx);
 				break;
 			}
@@ -481,9 +469,9 @@ DUK_INTERNAL void duk_hthread_create_builtin_objects(duk_hthread *thr) {
 				break;
 			}
 			case DUK__PROP_TYPE_ACCESSOR: {
-				duk_small_uint_t natidx_getter = (duk_small_uint_t) duk_bd_decode(bd, DUK__NATIDX_BITS);
-				duk_small_uint_t natidx_setter = (duk_small_uint_t) duk_bd_decode(bd, DUK__NATIDX_BITS);
-				duk_small_uint_t accessor_magic = (duk_small_uint_t) duk_bd_decode(bd, DUK__ACCESSOR_MAGIC_BITS);
+				duk_small_uint_t natidx_getter = (duk_small_uint_t) duk_bd_decode_varuint(bd);
+				duk_small_uint_t natidx_setter = (duk_small_uint_t) duk_bd_decode_varuint(bd);
+				duk_small_uint_t accessor_magic = (duk_small_uint_t) duk_bd_decode_varuint(bd);
 				duk_c_function c_func_getter;
 				duk_c_function c_func_setter;
 
@@ -521,7 +509,7 @@ DUK_INTERNAL void duk_hthread_create_builtin_objects(duk_hthread *thr) {
 		}
 
 		/* native function properties */
-		num = (duk_small_uint_t) duk_bd_decode(bd, DUK__NUM_FUNC_PROPS_BITS);
+		num = (duk_small_uint_t) duk_bd_decode_varuint(bd);
 		DUK_DDD(DUK_DDDPRINT("built-in object %ld, %ld function valued properties", (long) i, (long) num));
 		for (j = 0; j < num; j++) {
 			duk_hstring *h_key;
@@ -538,7 +526,7 @@ DUK_INTERNAL void duk_hthread_create_builtin_objects(duk_hthread *thr) {
 			duk__push_stridx_or_string(ctx, bd);
 			h_key = duk_known_hstring(ctx, -1);
 			DUK_UNREF(h_key);
-			natidx = (duk_small_uint_t) duk_bd_decode(bd, DUK__NATIDX_BITS);
+			natidx = (duk_small_uint_t) duk_bd_decode_varuint(bd);
 
 			c_length = (duk_small_uint_t) duk_bd_decode(bd, DUK__LENGTH_PROP_BITS);
 			c_nargs = (duk_int_t) duk_bd_decode_flagged(bd, DUK__NARGS_BITS, (duk_int32_t) c_length /*def_value*/);
@@ -553,7 +541,7 @@ DUK_INTERNAL void duk_hthread_create_builtin_objects(duk_hthread *thr) {
 			                     (c_nargs == DUK_VARARGS ? (long) -1 : (long) c_nargs)));
 
 			/* Cast converts magic to 16-bit signed value */
-			magic = (duk_int16_t) duk_bd_decode_flagged(bd, DUK__MAGIC_BITS, 0);
+			magic = (duk_int16_t) duk_bd_decode_varuint(bd);
 
 #if defined(DUK_USE_LIGHTFUNC_BUILTINS)
 			lightfunc_eligible =
@@ -612,10 +600,10 @@ DUK_INTERNAL void duk_hthread_create_builtin_objects(duk_hthread *thr) {
 			/* [ (builtin objects) name func ] */
 
 			duk_push_int(ctx, c_length);
-			duk_xdef_prop_stridx(ctx, -2, DUK_STRIDX_LENGTH, DUK_PROPDESC_FLAGS_NONE);
+			duk_xdef_prop_stridx_short(ctx, -2, DUK_STRIDX_LENGTH, DUK_PROPDESC_FLAGS_C);
 
 			duk_dup_m2(ctx);
-			duk_xdef_prop_stridx(ctx, -2, DUK_STRIDX_NAME, DUK_PROPDESC_FLAGS_NONE);
+			duk_xdef_prop_stridx_short(ctx, -2, DUK_STRIDX_NAME, DUK_PROPDESC_FLAGS_C);
 
 			/* XXX: other properties of function instances; 'arguments', 'caller'. */
 
@@ -657,8 +645,8 @@ DUK_INTERNAL void duk_hthread_create_builtin_objects(duk_hthread *thr) {
 	 */
 
 #if defined(DUK_USE_DATE_BUILTIN)
-	duk_get_prop_stridx(ctx, DUK_BIDX_DATE_PROTOTYPE, DUK_STRIDX_TO_UTC_STRING);
-	duk_xdef_prop_stridx(ctx, DUK_BIDX_DATE_PROTOTYPE, DUK_STRIDX_TO_GMT_STRING, DUK_PROPDESC_FLAGS_WC);
+	duk_get_prop_stridx_short(ctx, DUK_BIDX_DATE_PROTOTYPE, DUK_STRIDX_TO_UTC_STRING);
+	duk_xdef_prop_stridx_short(ctx, DUK_BIDX_DATE_PROTOTYPE, DUK_STRIDX_TO_GMT_STRING, DUK_PROPDESC_FLAGS_WC);
 #endif
 
 	h = duk_known_hobject(ctx, DUK_BIDX_DOUBLE_ERROR);
@@ -780,7 +768,7 @@ DUK_INTERNAL void duk_hthread_create_builtin_objects(duk_hthread *thr) {
 	                DUK_USE_OS_STRING
 			" "
 	                DUK_USE_COMPILER_STRING);
-	duk_xdef_prop_stridx(ctx, DUK_BIDX_DUKTAPE, DUK_STRIDX_ENV, DUK_PROPDESC_FLAGS_WC);
+	duk_xdef_prop_stridx_short(ctx, DUK_BIDX_DUKTAPE, DUK_STRIDX_ENV, DUK_PROPDESC_FLAGS_WC);
 
 	/*
 	 *  Since built-ins are not often extended, compact them.

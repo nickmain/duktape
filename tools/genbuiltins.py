@@ -14,8 +14,8 @@
 #
 #  Both of these have practical complications like endianness differences,
 #  pointer compression variants, object property table layout variants,
-#  and so on.  Multiple #ifdef'd initializer sections are emitted to cover
-#  all supported alternatives.
+#  and so on.  Multiple #if defined()'d initializer sections are emitted
+#  to cover all supported alternatives.
 #
 
 import logging
@@ -345,7 +345,7 @@ def metadata_prepare_objects_bidx(meta):
     # and need to be present in thr->builtins[].  The list is already
     # stripped of built-in objects which are not needed based on config.
     # Ideally we'd scan the actually needed indices from the source
-    # but since some usage is inside #ifdefs that's not trivial.
+    # but since some usage is inside #if defined()s that's not trivial.
     for obj in objlist:
         if obj.get('bidx', False):
             obj['bidx_used'] = True
@@ -391,8 +391,8 @@ def metadata_normalize_shorthand(meta):
         obj['class'] = 'Function'
         obj['callable'] = True
         obj['constructable'] = val.get('constructable', False)
-        props.append({ 'key': 'length', 'value': val['length'], 'attributes': '' })
-        props.append({ 'key': 'name', 'value': funprop['key'], 'attributes': '' })
+        props.append({ 'key': 'length', 'value': val['length'], 'attributes': 'c' })  # Configurable in ES6
+        props.append({ 'key': 'name', 'value': funprop['key'], 'attributes': 'c' })   # Configurable in ES6
         return obj
 
     def addAccessor(funprop, magic, nargs, length, name, native_func):
@@ -409,8 +409,8 @@ def metadata_normalize_shorthand(meta):
         obj['constructable'] = False
         # Shorthand accessors are minimal and have no .length or .name
         # right now.  Use longhand if these matter.
-        #props.append({ 'key': 'length', 'value': length, 'attributes': '' })
-        #props.append({ 'key': 'name', 'value': name, 'attributes': '' })
+        #props.append({ 'key': 'length', 'value': length, 'attributes': 'c' })
+        #props.append({ 'key': 'name', 'value': name, 'attributes': 'c' })
         return obj
 
     def decodeGetterShorthand(key, funprop):
@@ -1189,19 +1189,23 @@ def load_metadata(opts, rom=False, build_info=None, active_opts=None):
 
 # Magic values for Math built-in.
 math_onearg_magic = {
-    'fabs': 0,   # BI_MATH_FABS_IDX
-    'acos': 1,   # BI_MATH_ACOS_IDX
-    'asin': 2,   # BI_MATH_ASIN_IDX
-    'atan': 3,   # BI_MATH_ATAN_IDX
-    'ceil': 4,   # BI_MATH_CEIL_IDX
-    'cos': 5,    # BI_MATH_COS_IDX
-    'exp': 6,    # BI_MATH_EXP_IDX
-    'floor': 7,  # BI_MATH_FLOOR_IDX
-    'log': 8,    # BI_MATH_LOG_IDX
-    'round': 9,  # BI_MATH_ROUND_IDX
-    'sin': 10,   # BI_MATH_SIN_IDX
-    'sqrt': 11,  # BI_MATH_SQRT_IDX
-    'tan': 12    # BI_MATH_TAN_IDX
+    'fabs': 0,    # BI_MATH_FABS_IDX
+    'acos': 1,    # BI_MATH_ACOS_IDX
+    'asin': 2,    # BI_MATH_ASIN_IDX
+    'atan': 3,    # BI_MATH_ATAN_IDX
+    'ceil': 4,    # BI_MATH_CEIL_IDX
+    'cos': 5,     # BI_MATH_COS_IDX
+    'exp': 6,     # BI_MATH_EXP_IDX
+    'floor': 7,   # BI_MATH_FLOOR_IDX
+    'log': 8,     # BI_MATH_LOG_IDX
+    'round': 9,   # BI_MATH_ROUND_IDX
+    'sin': 10,    # BI_MATH_SIN_IDX
+    'sqrt': 11,   # BI_MATH_SQRT_IDX
+    'tan': 12,    # BI_MATH_TAN_IDX
+    'cbrt': 13,   # BI_MATH_CBRT_IDX
+    'log2': 14,   # BI_MATH_LOG2_IDX
+    'log10': 15,  # BI_MATH_LOG10_IDX
+    'trunc': 16,  # BI_MATH_TRUNC_IDX
 }
 math_twoarg_magic = {
     'atan2': 0,  # BI_MATH_ATAN2_IDX
@@ -1342,25 +1346,12 @@ ACCESSOR_PROPERTY_ATTRIBUTES = 'c'
 DEFAULT_DATA_PROPERTY_ATTRIBUTES = 'wc'
 
 # Encoding constants (must match duk_hthread_builtins.c).
-CLASS_BITS = 5
-BIDX_BITS = 7
-STRIDX_BITS = 9   # would be nice to optimize to 8
-NATIDX_BITS = 8
-NUM_NORMAL_PROPS_BITS = 6
-NUM_FUNC_PROPS_BITS = 6
 PROP_FLAGS_BITS = 3
-STRING_LENGTH_BITS = 8
-STRING_CHAR_BITS = 7
 LENGTH_PROP_BITS = 3
 NARGS_BITS = 3
 PROP_TYPE_BITS = 3
-MAGIC_BITS = 16
-ACCESSOR_MAGIC_BITS = 2
 
 NARGS_VARARGS_MARKER = 0x07
-NO_CLASS_MARKER = 0x00   # 0 = DUK_HOBJECT_CLASS_NONE
-NO_BIDX_MARKER = 0x7f
-NO_STRIDX_MARKER = 0xff
 
 PROP_TYPE_DOUBLE = 0
 PROP_TYPE_STRING = 1
@@ -1380,16 +1371,16 @@ PROPDESC_FLAG_ACCESSOR =     (1 << 3)  # unused now
 # Class names, numeric indices must match duk_hobject.h class numbers.
 class_names = [
     'Unused',
-    'Arguments',
+    'Object',
     'Array',
+    'Function',
+    'Arguments',
     'Boolean',
     'Date',
     'Error',
-    'Function',
     'JSON',
     'Math',
     'Number',
-    'Object',
     'RegExp',
     'String',
     'global',
@@ -1397,7 +1388,8 @@ class_names = [
     'DecEnv',
     'Buffer',
     'Pointer',
-    'Thread',
+    'Thread'
+    # Remaining class names are not currently needed.
 ]
 class2num = {}
 for i,v in enumerate(class_names):
@@ -1407,111 +1399,129 @@ for i,v in enumerate(class_names):
 def class_to_number(x):
     return class2num[x]
 
+# Bitpack a string into a format shared by heap and thread init data.
+def bitpack_string(be, s, stats=None):
+    # Strings are encoded as follows: a string begins in lowercase
+    # mode and recognizes the following 5-bit symbols:
+    #
+    #    0-25    'a' ... 'z' or 'A' ... 'Z' depending on uppercase mode
+    #    26-31   special controls, see code below
+
+    LOOKUP1 = 26
+    LOOKUP2 = 27
+    SWITCH1 = 28
+    SWITCH = 29
+    UNUSED1 = 30
+    EIGHTBIT = 31
+    LOOKUP = '0123456789_ \xff\x80"{'  # special characters
+    assert(len(LOOKUP) == 16)
+
+    # support up to 256 byte strings now, cases above ~30 bytes are very
+    # rare, so favor short strings in encoding
+    if len(s) <= 30:
+        be.bits(len(s), 5)
+    else:
+        be.bits(31, 5)
+        be.bits(len(s), 8)
+
+    # 5-bit character, mode specific
+    mode = 'lowercase'
+
+    for idx, c in enumerate(s):
+        # This encoder is not that optimal, but good enough for now.
+
+        islower = (ord(c) >= ord('a') and ord(c) <= ord('z'))
+        isupper = (ord(c) >= ord('A') and ord(c) <= ord('Z'))
+        islast = (idx == len(s) - 1)
+        isnextlower = False
+        isnextupper = False
+        if not islast:
+            c2 = s[idx+1]
+            isnextlower = (ord(c2) >= ord('a') and ord(c2) <= ord('z'))
+            isnextupper = (ord(c2) >= ord('A') and ord(c2) <= ord('Z'))
+
+        # XXX: Add back special handling for hidden or other symbols?
+
+        if islower and mode == 'lowercase':
+            be.bits(ord(c) - ord('a'), 5)
+            if stats is not None: stats['n_optimal'] += 1
+        elif isupper and mode == 'uppercase':
+            be.bits(ord(c) - ord('A'), 5)
+            if stats is not None: stats['n_optimal'] += 1
+        elif islower and mode == 'uppercase':
+            if isnextlower:
+                be.bits(SWITCH, 5)
+                be.bits(ord(c) - ord('a'), 5)
+                mode = 'lowercase'
+                if stats is not None: stats['n_switch'] += 1
+            else:
+                be.bits(SWITCH1, 5)
+                be.bits(ord(c) - ord('a'), 5)
+                if stats is not None: stats['n_switch1'] += 1
+        elif isupper and mode == 'lowercase':
+            if isnextupper:
+                be.bits(SWITCH, 5)
+                be.bits(ord(c) - ord('A'), 5)
+                mode = 'uppercase'
+                if stats is not None: stats['n_switch'] += 1
+            else:
+                be.bits(SWITCH1, 5)
+                be.bits(ord(c) - ord('A'), 5)
+                if stats is not None: stats['n_switch1'] += 1
+        elif c in LOOKUP:
+            idx = LOOKUP.find(c)
+            if idx >= 8:
+                be.bits(LOOKUP2, 5)
+                be.bits(idx - 8, 3)
+                if stats is not None: stats['n_lookup2'] += 1
+            else:
+                be.bits(LOOKUP1, 5)
+                be.bits(idx, 3)
+                if stats is not None: stats['n_lookup1'] += 1
+        elif ord(c) >= 0 and ord(c) <= 255:
+            logger.debug('eightbit encoding for %d (%s)' % (ord(c), c))
+            be.bits(EIGHTBIT, 5)
+            be.bits(ord(c), 8)
+            if stats is not None: stats['n_eightbit'] += 1
+        else:
+            raise Exception('internal error in bitpacking a string')
+
 # Generate bit-packed RAM string init data.
 def gen_ramstr_initdata_bitpacked(meta):
     be = dukutil.BitEncoder()
 
-    # Strings are encoded as follows: a string begins in lowercase
-    # mode and recognizes the following 5-bit symbols:
-    #
-    #    0-25    'a' ... 'z'
-    #    26         '_'
-    #    27      0x00 (actually decoded to 0xff, internal marker)
-    #    28         reserved
-    #    29      switch to uppercase for one character
-    #            (next 5-bit symbol must be in range 0-25)
-    #    30      switch to uppercase
-    #    31      read a 7-bit character verbatim
-    #
-    # Uppercase mode is the same except codes 29 and 30 switch to
-    # lowercase.
-
-    UNDERSCORE = 26
-    ZERO = 27
-    SWITCH1 = 29
-    SWITCH = 30
-    SEVENBIT = 31
-
     maxlen = 0
-    n_optimal = 0
-    n_switch1 = 0
-    n_switch = 0
-    n_sevenbit = 0
+    stats = {
+        'n_optimal': 0,
+        'n_lookup1': 0,
+        'n_lookup2': 0,
+        'n_switch1': 0,
+        'n_switch': 0,
+        'n_eightbit': 0
+    }
 
     for s_obj in meta['strings_stridx']:
         s = s_obj['str']
-
-        be.bits(len(s), 5)
-
         if len(s) > maxlen:
             maxlen = len(s)
-
-        # 5-bit character, mode specific
-        mode = 'lowercase'
-
-        for idx, c in enumerate(s):
-            # This encoder is not that optimal, but good enough for now.
-
-            islower = (ord(c) >= ord('a') and ord(c) <= ord('z'))
-            isupper = (ord(c) >= ord('A') and ord(c) <= ord('Z'))
-            islast = (idx == len(s) - 1)
-            isnextlower = False
-            isnextupper = False
-            if not islast:
-                c2 = s[idx+1]
-                isnextlower = (ord(c2) >= ord('a') and ord(c2) <= ord('z'))
-                isnextupper = (ord(c2) >= ord('A') and ord(c2) <= ord('Z'))
-
-            if c == '_':
-                be.bits(UNDERSCORE, 5)
-                n_optimal += 1
-            elif c == '\xff':
-                # A 0xff prefix (never part of valid UTF-8) is used for internal properties.
-                # It is encoded as 0x00 in generated init data for technical reasons: it
-                # keeps lookup table elements 7 bits instead of 8 bits.
-                be.bits(ZERO, 5)
-                n_optimal += 1
-            elif islower and mode == 'lowercase':
-                be.bits(ord(c) - ord('a'), 5)
-                n_optimal += 1
-            elif isupper and mode == 'uppercase':
-                be.bits(ord(c) - ord('A'), 5)
-                n_optimal += 1
-            elif islower and mode == 'uppercase':
-                if isnextlower:
-                    be.bits(SWITCH, 5)
-                    be.bits(ord(c) - ord('a'), 5)
-                    mode = 'lowercase'
-                    n_switch += 1
-                else:
-                    be.bits(SWITCH1, 5)
-                    be.bits(ord(c) - ord('a'), 5)
-                    n_switch1 += 1
-            elif isupper and mode == 'lowercase':
-                if isnextupper:
-                    be.bits(SWITCH, 5)
-                    be.bits(ord(c) - ord('A'), 5)
-                    mode = 'uppercase'
-                    n_switch += 1
-                else:
-                    be.bits(SWITCH1, 5)
-                    be.bits(ord(c) - ord('A'), 5)
-                    n_switch1 += 1
-            else:
-                assert(ord(c) >= 0 and ord(c) <= 127)
-                be.bits(SEVENBIT, 5)
-                be.bits(ord(c), 7)
-                n_sevenbit += 1
-                #logger.debug('sevenbit for: %r' % c)
+        bitpack_string(be, s, stats)
 
     # end marker not necessary, C code knows length from define
 
+    if be._varuint_count > 0:
+        logger.debug('Varuint distribution:')
+        logger.debug(json.dumps(be._varuint_dist[0:1024]))
+        logger.debug('Varuint encoding categories: %r' % be._varuint_cats)
+        logger.debug('Varuint efficiency: %f bits/value' % (float(be._varuint_bits) / float(be._varuint_count)))
     res = be.getByteString()
 
     logger.debug(('%d ram strings, %d bytes of string init data, %d maximum string length, ' + \
-                 'encoding: optimal=%d,switch1=%d,switch=%d,sevenbit=%d') % \
+                 'encoding: optimal=%d,lookup1=%d,lookup2=%d,switch1=%d,switch=%d,eightbit=%d') % \
                  (len(meta['strings_stridx']), len(res), maxlen, \
-                 n_optimal, n_switch1, n_switch, n_sevenbit))
+                 stats['n_optimal'],
+                 stats['n_lookup1'], stats['n_lookup2'],
+                 stats['n_switch1'], stats['n_switch'],
+                 stats['n_eightbit']))
 
     return res, maxlen
 
@@ -1586,24 +1596,20 @@ def encode_property_flags(flags):
 def gen_ramobj_initdata_for_object(meta, be, bi, string_to_stridx, natfunc_name_to_natidx, objid_to_bidx):
     def _stridx(strval):
         stridx = string_to_stridx[strval]
-        be.bits(stridx, STRIDX_BITS)
+        be.varuint(stridx)
     def _stridx_or_string(strval):
-        # XXX: could share the built-in strings decoder, would save ~200 bytes.
         stridx = string_to_stridx.get(strval)
         if stridx is not None:
-            be.bits(0, 1)  # marker: stridx
-            be.bits(stridx, STRIDX_BITS)
+            be.varuint(stridx + 1)
         else:
-            be.bits(1, 1)  # marker: raw bytes
-            be.bits(len(strval), STRING_LENGTH_BITS)
-            for i in xrange(len(strval)):
-                be.bits(ord(strval[i]), STRING_CHAR_BITS)
+            be.varuint(0)
+            bitpack_string(be, strval)
     def _natidx(native_name):
         natidx = natfunc_name_to_natidx[native_name]
-        be.bits(natidx, NATIDX_BITS)
+        be.varuint(natidx)
 
     class_num = class_to_number(bi['class'])
-    be.bits(class_num, CLASS_BITS)
+    be.varuint(class_num)
 
     props = [x for x in bi['properties']]  # clone
 
@@ -1670,13 +1676,9 @@ def gen_ramobj_initdata_for_object(meta, be, bi, string_to_stridx, natfunc_name_
 
         # Convert signed magic to 16-bit unsigned for encoding
         magic = resolve_magic(bi.get('magic'), objid_to_bidx) & 0xffff
-        if magic != 0:
-            assert(magic >= 0)
-            assert(magic < (1 << MAGIC_BITS))
-            be.bits(1, 1)
-            be.bits(magic, MAGIC_BITS)
-        else:
-            be.bits(0, 1)
+        assert(magic >= 0)
+        assert(magic <= 0xffff)
+        be.varuint(magic)
 
 # Generate RAM object initdata for an object's properties.
 def gen_ramobj_initdata_for_props(meta, be, bi, string_to_stridx, natfunc_name_to_natidx, objid_to_bidx, double_byte_order):
@@ -1684,55 +1686,53 @@ def gen_ramobj_initdata_for_props(meta, be, bi, string_to_stridx, natfunc_name_t
     count_function_props = 0
 
     def _bidx(bi_id):
+        be.varuint(objid_to_bidx[bi_id])
+    def _bidx_or_none(bi_id):
         if bi_id is None:
-            be.bits(NO_BIDX_MARKER, BIDX_BITS)
+            be.varuint(0)
         else:
-            be.bits(objid_to_bidx[bi_id], BIDX_BITS)
+            be.varuint(objid_to_bidx[bi_id] + 1)
     def _stridx(strval):
         stridx = string_to_stridx[strval]
-        be.bits(stridx, STRIDX_BITS)
+        be.varuint(stridx)
     def _stridx_or_string(strval):
-        # XXX: could share the built-in strings decoder, would save ~200 bytes.
         stridx = string_to_stridx.get(strval)
         if stridx is not None:
-            be.bits(0, 1)  # marker: stridx
-            be.bits(stridx, STRIDX_BITS)
+            be.varuint(stridx + 1)
         else:
-            be.bits(1, 1)  # marker: raw bytes
-            be.bits(len(strval), STRING_LENGTH_BITS)
-            for i in xrange(len(strval)):
-                be.bits(ord(strval[i]), STRING_CHAR_BITS)
+            be.varuint(0)
+            bitpack_string(be, strval)
     def _natidx(native_name):
         if native_name is None:
             natidx = 0  # 0 is NULL in the native functions table, denotes missing function
         else:
             natidx = natfunc_name_to_natidx[native_name]
-        be.bits(natidx, NATIDX_BITS)
+        be.varuint(natidx)
     props = [x for x in bi['properties']]  # clone
 
     # internal prototype: not an actual property so not in property list
     if bi.has_key('internal_prototype'):
-        _bidx(bi['internal_prototype'])
+        _bidx_or_none(bi['internal_prototype'])
     else:
-        _bidx(None)
+        _bidx_or_none(None)
 
     # external prototype: encoded specially, steal from property list
     prop_proto = steal_prop(props, 'prototype')
     if prop_proto is not None:
         assert(prop_proto['value']['type'] == 'object')
         assert(prop_proto['attributes'] == '')
-        _bidx(prop_proto['value']['id'])
+        _bidx_or_none(prop_proto['value']['id'])
     else:
-        _bidx(None)
+        _bidx_or_none(None)
 
     # external constructor: encoded specially, steal from property list
     prop_constr = steal_prop(props, 'constructor')
     if prop_constr is not None:
         assert(prop_constr['value']['type'] == 'object')
         assert(prop_constr['attributes'] == 'wc')
-        _bidx(prop_constr['value']['id'])
+        _bidx_or_none(prop_constr['value']['id'])
     else:
-        _bidx(None)
+        _bidx_or_none(None)
 
     # name: encoded specially for function objects, so steal and ignore here
     if bi['class'] == 'Function':
@@ -1767,7 +1767,7 @@ def gen_ramobj_initdata_for_props(meta, be, bi, string_to_stridx, natfunc_name_t
         else:
             values.append(prop)
 
-    be.bits(len(values), NUM_NORMAL_PROPS_BITS)
+    be.varuint(len(values))
 
     for valspec in values:
         count_normal_props += 1
@@ -1841,12 +1841,9 @@ def gen_ramobj_initdata_for_props(meta, be, bi, string_to_stridx, natfunc_name_t
                 be.bits(PROP_TYPE_STRIDX, PROP_TYPE_BITS)
                 _stridx(val)
             else:
-                # Not in string table -> encode as raw 7-bit value
-
+                # Not in string table, bitpack string value as is.
                 be.bits(PROP_TYPE_STRING, PROP_TYPE_BITS)
-                be.bits(len(val), STRING_LENGTH_BITS)
-                for i in xrange(len(val)):
-                    be.bits(ord(val[i]), STRING_CHAR_BITS)
+                bitpack_string(be, val)
         elif isinstance(val, dict):
             if val['type'] == 'object':
                 be.bits(PROP_TYPE_BUILTIN, PROP_TYPE_BITS)
@@ -1873,7 +1870,7 @@ def gen_ramobj_initdata_for_props(meta, be, bi, string_to_stridx, natfunc_name_t
                     assert(getter_magic == setter_magic)
                 _natidx(getter_natfun)
                 _natidx(setter_natfun)
-                be.bits(getter_magic, ACCESSOR_MAGIC_BITS)
+                be.varuint(getter_magic)
             elif val['type'] == 'lightfunc':
                 logger.warning('RAM init data format doesn\'t support "lightfunc" now, value replaced with "undefined": %r' % valspec)
                 be.bits(PROP_TYPE_UNDEFINED, PROP_TYPE_BITS)
@@ -1882,7 +1879,7 @@ def gen_ramobj_initdata_for_props(meta, be, bi, string_to_stridx, natfunc_name_t
         else:
             raise Exception('unsupported value: %s' % repr(val))
 
-    be.bits(len(functions), NUM_FUNC_PROPS_BITS)
+    be.varuint(len(functions))
 
     for funprop in functions:
         count_function_props += 1
@@ -1910,13 +1907,9 @@ def gen_ramobj_initdata_for_props(meta, be, bi, string_to_stridx, natfunc_name_t
         # (there are quite a lot of function properties)
         # Convert signed magic to 16-bit unsigned for encoding
         magic = resolve_magic(funobj.get('magic'), objid_to_bidx) & 0xffff
-        if magic != 0:
-            assert(magic >= 0)
-            assert(magic < (1 << MAGIC_BITS))
-            be.bits(1, 1)
-            be.bits(magic, MAGIC_BITS)
-        else:
-            be.bits(0, 1)
+        assert(magic >= 0)
+        assert(magic <= 0xffff)
+        be.varuint(magic)
 
     return count_normal_props, count_function_props
 
@@ -1979,6 +1972,11 @@ def gen_ramobj_initdata_bitpacked(meta, native_funcs, natfunc_name_to_natidx, do
         count_normal_props += count_obj_normal
         count_function_props += count_obj_func
 
+    if be._varuint_count > 0:
+        logger.debug('varuint distribution:')
+        logger.debug(json.dumps(be._varuint_dist[0:1024]))
+        logger.debug('Varuint encoding categories: %r' % be._varuint_cats)
+        logger.debug('Varuint efficiency: %f bits/value' % (float(be._varuint_bits) / float(be._varuint_count)))
     romobj_init_data = be.getByteString()
     #logger.debug(repr(romobj_init_data))
     #logger.debug(len(romobj_init_data))
@@ -2474,7 +2472,7 @@ def rom_emit_object_initializer_types_and_macros(genc):
     genc.emitLine('#error invalid endianness defines')
     genc.emitLine('#endif')
     genc.emitLine('#else  /* DUK_USE_PACKED_TVAL */')
-    genc.emitLine('#define DUK__TVAL_NUMBER(hostbytes) { DUK__TAG_NUMBER, 0, hostbytes }')  # bytes already in host order
+    genc.emitLine('#define DUK__TVAL_NUMBER(hostbytes) { DUK_TAG_NUMBER, 0, hostbytes }')  # bytes already in host order
     genc.emitLine('#define DUK__TVAL_UNDEFINED() { DUK_TAG_UNDEFINED, 0, {0,0,0,0,0,0,0,0} }')
     genc.emitLine('#define DUK__TVAL_NULL() { DUK_TAG_NULL, 0, {0,0,0,0,0,0,0,0} }')
     genc.emitLine('#define DUK__TVAL_BOOLEAN(bval) { DUK_TAG_BOOLEAN, 0, (bval), 0 }')
@@ -3002,7 +3000,7 @@ def main():
 
     gc_hdr = dukutil.GenerateC()
     gc_hdr.emitHeader('genbuiltins.py')
-    gc_hdr.emitLine('#ifndef DUK_BUILTINS_H_INCLUDED')
+    gc_hdr.emitLine('#if !defined(DUK_BUILTINS_H_INCLUDED)')
     gc_hdr.emitLine('#define DUK_BUILTINS_H_INCLUDED')
     gc_hdr.emitLine('')
     gc_hdr.emitLine('#if defined(DUK_USE_ROM_STRINGS)')

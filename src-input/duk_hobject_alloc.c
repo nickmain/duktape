@@ -9,7 +9,7 @@
 #include "duk_internal.h"
 
 DUK_LOCAL void duk__init_object_parts(duk_heap *heap, duk_hobject *obj, duk_uint_t hobject_flags) {
-#ifdef DUK_USE_EXPLICIT_NULL_INIT
+#if defined(DUK_USE_EXPLICIT_NULL_INIT)
 	DUK_HOBJECT_SET_PROPS(heap, obj, NULL);
 #endif
 
@@ -78,14 +78,16 @@ DUK_INTERNAL duk_hcompfunc *duk_hcompfunc_alloc(duk_heap *heap, duk_uint_t hobje
 
 	duk__init_object_parts(heap, &res->obj, hobject_flags);
 
-#ifdef DUK_USE_EXPLICIT_NULL_INIT
-#ifdef DUK_USE_HEAPPTR16
+#if defined(DUK_USE_EXPLICIT_NULL_INIT)
+#if defined(DUK_USE_HEAPPTR16)
 	/* NULL pointer is required to encode to zero, so memset is enough. */
 #else
 	res->data = NULL;
 	res->funcs = NULL;
 	res->bytecode = NULL;
 #endif
+	res->lex_env = NULL;
+	res->var_env = NULL;
 #endif
 
 	return res;
@@ -102,7 +104,7 @@ DUK_INTERNAL duk_hnatfunc *duk_hnatfunc_alloc(duk_heap *heap, duk_uint_t hobject
 
 	duk__init_object_parts(heap, &res->obj, hobject_flags);
 
-#ifdef DUK_USE_EXPLICIT_NULL_INIT
+#if defined(DUK_USE_EXPLICIT_NULL_INIT)
 	res->func = NULL;
 #endif
 
@@ -121,7 +123,7 @@ DUK_INTERNAL duk_hbufobj *duk_hbufobj_alloc(duk_heap *heap, duk_uint_t hobject_f
 
 	duk__init_object_parts(heap, &res->obj, hobject_flags);
 
-#ifdef DUK_USE_EXPLICIT_NULL_INIT
+#if defined(DUK_USE_EXPLICIT_NULL_INIT)
 	res->buf = NULL;
 #endif
 
@@ -149,7 +151,7 @@ DUK_INTERNAL duk_hthread *duk_hthread_alloc(duk_heap *heap, duk_uint_t hobject_f
 
 	duk__init_object_parts(heap, &res->obj, hobject_flags);
 
-#ifdef DUK_USE_EXPLICIT_NULL_INIT
+#if defined(DUK_USE_EXPLICIT_NULL_INIT)
 	res->ptr_curr_pc = NULL;
 	res->heap = NULL;
 	res->valstack = NULL;
@@ -160,7 +162,7 @@ DUK_INTERNAL duk_hthread *duk_hthread_alloc(duk_heap *heap, duk_uint_t hobject_f
 	res->catchstack = NULL;
 	res->resumer = NULL;
 	res->compile_ctx = NULL,
-#ifdef DUK_USE_HEAPPTR16
+#if defined(DUK_USE_HEAPPTR16)
 	res->strs16 = NULL;
 #else
 	res->strs = NULL;

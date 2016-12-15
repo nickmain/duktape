@@ -1630,6 +1630,60 @@ Released
   __attribute__ ((unused)) for internal function declarations (GH-916,
   GH-942)
 
+1.5.2 (2016-12-09)
+------------------
+
+* Fix genconfig.py forced option boolean comparison; for forced numeric option
+  value 0 genconfig would emit "#undef XXX" (instead of "#define XXX 0") and
+  for forced numeric option value 1 it would emit "#define XXX" (instead of
+  "#define XXX 1") (GH-954)
+
+* Fix incorrect value stack handling in duk_put_prop_(l)string() and
+  duk_put_prop_index() when the target object and the property value
+  are in the same value stack slot (which is unusual but conceptually
+  clear) (GH-959)
+
+* Fix incorrect buffer zeroing assumption in regexp executor, triggered
+  when DUK_USE_ZERO_BUFFER_DATA is not set (default is set) (GH-978)
+
+* Fix incorrect evaluation order of X <op>= Y expressions when the RHS
+  (Y) mutates the value of X (GH-992)
+
+* Fix String.fromCharCode() behavior for non-BMP characters when standard
+  behavior is enabled (DUK_USE_NONSTD_STRING_FROMCHARCODE_32BIT disabled):
+  use ToUint16() + CESU-8 rather than ToUint32() + CESU-8 which produces
+  two codepoints for non-BMP characters (GH-1046)
+
+* Fix a few bugs in object property handling (delete property and
+  Object.defineProperty()) where an object property table resize triggered
+  by a finalizer of a previous value could cause memory unsafe behavior
+  (GH-1096)
+
+* Add an extra module (extras/module-duktape) providing a Duktape 1.x
+  compatible module loading framework (Duktape.modSearch etc) (GH-821,
+  GH-1127)
+
+* Fix duk_hcompfunc 'data' field != NULL assumptions which might lead to
+  memory unsafe behavior if Duktape ran out of memory when creating a
+  duk_hcompfunc during compilation or function instantiation (GH-1144,
+  GH-1132)
+
+* Fix JSON stringify fastpath handling of array gaps in JX and JC; they
+  incorrectly stringified as 'null' (like in JSON) instead of 'undefined'
+  and '{"_undef":true}' as intended (GH-859, GH-1149)
+
+* Fix memory unsafe handling of Object.isPrototypeOf() when the argument
+  given has no prototype (e.g. argument is Object.prototype) (GH-1162,
+  GH-1163)
+
+1.6.0 (2016-12-12)
+------------------
+
+* Add duk_suspend() and duk_resume() which allow a native thread running a
+  Duktape/C function to be suspended temporarily (e.g. when a native system
+  call blocks) so that other native threads may execute while the thread is
+  blocked (GH-893, GH-909)
+
 Planned
 =======
 
@@ -1681,6 +1735,14 @@ Planned
   Buffer.prototype.toString() does UTF-8 decoding (previously buffer data
   was copied into internal string representation as is) (GH-1020)
 
+* Incompatible change: change Object constructor argument coercion policy
+  to match ES6 requirements for .keys(), .getOwnPropertyNames(),
+  .getOwnPropertyDescriptor(), .getPrototypeOf(), .freeze(), .isFrozen(),
+  .seal(), .isSealed(), .preventExtensions(), and .isExtensible();
+  instead of rejecting non-objects with a TypeError, they are now coerced
+  to objects or treated as non-extensible objects with no own properties
+  (GH-1028, GH-1164)
+
 * Incompatible change: plain pointer values now test true in instanceof
   (plainPointer instanceof Duktape.Pointer === true) (GH-864)
 
@@ -1719,6 +1781,9 @@ Planned
 
 * Incompatible change: debug protocol version bumped from 1 to 2 to indicate
   version incompatible protocol changes in the 2.0.0 release (GH-756)
+
+* Incompatible change: make callstack level mandatory for most debugger
+  commands which accept one (GH-747, GH-1109)
 
 * Incompatible change: require a DUK_USE_DEBUG_WRITE() macro for handling
   debug writes when DUK_USE_DEBUG is enabled; this avoids a platform I/O
@@ -1779,6 +1844,13 @@ Planned
   [[DefaultValue]] specification algorithm removed in ES6 (it was folded
   to ToPrimitive()), use duk_to_primitive() instead (GH-984)
 
+* Incompatible change: duk_gc() no longer allows a NULL context pointer
+  for consistency with other API calls (GH-1129)
+
+* Incompatible change: Duktape.info() output has been changed from an array
+  (which is difficult to version and work with) to an object with named
+  properties; the properties are not under versioning guarantees (GH-1125)
+
 * Add support for dropping built-in bindings entirely when they are disabled
   in configuration, e.g. the Proxy and buffer object bindings will be absent
   instead of being replaced by functions throwing an error; this is more
@@ -1796,6 +1868,13 @@ Planned
 * Add convenience API calls duk_get_prop_lstring(), duk_put_prop_lstring(),
   duk_del_prop_lstring(), duk_has_prop_lstring(), duk_get_global_lstring(),
   duk_put_global_lstring() (GH-946, GH-953)
+
+* Add a ToString (later, ToPropertyKey) coercion to duk_def_prop() key
+  argument to allow e.g. numbers to be used in the key slot (GH-836, GH-1130)
+
+* Add duk_get_prop_desc() API call which pushes a property descriptor object
+  for a target object and key, similar to Object.getOwnPropertyDescriptor()
+  (GH-1087)
 
 * Add duk_suspend() and duk_resume() which allow a native thread running a
   Duktape/C function to be suspended temporarily (e.g. when a native system
@@ -1836,10 +1915,18 @@ Planned
   and identifiers, no RegExp support yet (requires RegExp /u Unicode mode)
   (GH-1001)
 
-* Add support for ES6 octal (0o123) and binary (0b100001) literals (GH-1057)
+* Add support for ES6 octal (0o123) and binary (0b100001) in source code
+  literals and ToNumber() coercion (e.g. "+'0o123'") (GH-1057, GH-1084)
 
 * Add support for ES6 String.prototype.codePointAt(), String.fromCodePoint(),
   and String.prototype.repeat() (GH-1043, GH-1049, GH-1050)
+
+* Add support for ES6 Math.hypot(), Math.cbrt(), Math.log2(), Math.log10(),
+  Math.trunc() (GH-1069, GH-1093, GH-1095)
+
+* Add support for ES6 Object.assign() (GH-1064)
+
+* Add support for ES6 Object.is() and duk_samevalue() API call (GH-1068)
 
 * Add TextEncoder and TextDecoder built-ins (the Encoding API) which allow
   Ecmascript code to read and write text stored in an ArrayBuffer or a plain
@@ -1850,6 +1937,21 @@ Planned
   for-in, Object.keys(), and duk_enum() even though that's not strictly
   required by ES6 or ES7 (GH-1054)
 
+* Follow ES7 behavior when a Proxy instance is used as a for-in target:
+  the "ownKeys" trap is invoked instead of the "enumerate" trap, and the
+  "enumerate" trap is thus obsoleted entirely (GH-1115)
+
+* Add enumerability check for properties enumerated using Proxy "ownKeys"
+  trap; because "getOwnPropertyDescriptor" trap is not yet supported, the
+  check is always made against the target object (GH-1115)
+
+* Align RegExp.prototype behavior more closely with ES6: .source, .global,
+  .ignoreCase, .multiline are now inherited getters; .flags, .sticky, and
+  .unicode have been added (they are inherited getters too); constructor
+  behavior has been revised for ES6 behavior; however, leniency to allow
+  e.g. RegExp.prototype.source (from ES2017 draft) is supported for real
+  world code compatibility (GH-1178)
+
 * Remove no longer needed platform wrappers in duk_config.h: DUK_ABORT(),
   DUK_EXIT(), DUK_PRINTF(), DUK_FPRINTF(), DUK_FOPEN(), DUK_FCLOSE(),
   DUK_FREAD(), DUK_FWRITE(), DUK_FSEEK(), DUK_FTELL(), DUK_FFLUSH(),
@@ -1859,6 +1961,21 @@ Planned
   duk_components_to_time()) to allow C code to conveniently work with the
   same time provider as seen by Ecmascript code (GH-771)
 
+* Add duk_push_bare_object() API call which pushes an object without an
+  internal prototype, equivalent to Object.create(null) (GH-1126)
+
+* Add DUK_GC_COMPACT flag to duk_gc() to force object property table
+  compaction (GH-778, GH-1129)
+
+* Add duk_inspect_value() to provide internal information about an argument
+  value; the output matches Duktape.info() (GH-1125)
+
+* Add duk_inspect_callstack_entry() to provide internal information about a
+  callstack entry; the output matches Duktape.act() (GH-1128)
+
+* Add ability to perform an indirect debugger Eval with non-empty callstack by
+  sending null for the callstack level (GH-747)
+
 * Add a human readable summary of 'new MyConstructor()' constructor call
   target when the target is non-constructable (GH-757)
 
@@ -1866,6 +1983,9 @@ Planned
 
 * Remove duk_{get,put,has,del}_var() calls from API header; they were not
   fully implemented and not part of the documented public API (GH-762)
+
+* Allow a bound Ecmascript function as an argument to new Duktape.Thread()
+  (GH-1134, GH-1157)
 
 * Minor changes to error messages for errors thrown by Duktape internals
   (GH-827, GH-839, GH-840, GH-1016)
@@ -1897,10 +2017,12 @@ Planned
   (GH-767)
 
 * Add an extra module (extras/module-duktape) providing a Duktape 1.x
-  compatible module loading framework (Duktape.modSearch etc) (GH-821)
+  compatible module loading framework (Duktape.modSearch etc) (GH-821,
+  GH-1127)
 
 * Add an extra module (extras/module-node) providing a Node.js-like module
-  loading framework supporting require.cache, module.loaded, etc. (GH-796)
+  loading framework supporting require.cache, module.loaded, etc. (GH-796,
+  GH-1127)
 
 * Add an extra module (extras/minimal-printf) providing minimal,
   Duktape-optimized sprintf(), snprintf(), vsnprintf(), and sscanf()
@@ -1951,6 +2073,75 @@ Planned
 * Change parsing of octal escapes in string literals to better align with
   ES6 and other engines; "\078" is now accepted and is the same as
   "\u00078", "\8" and "\9" are accepted as literal "8" and "9"  (GH-1057)
+
+* Change bound function .name property handling to match ES6 requirements;
+  for a target function with name "foo", bound function name is "bound foo"
+  (GH-1113)
+
+* Change bound function internal prototype handling to match ES6 requirements;
+  bound function internal prototype is copied from the target function
+  instead of always being Function.prototype (GH-1135)
+
+* Change Function.prototype.toString() output to match ES6 requirements;
+  the output no longer parses with eval() but causes a SyntaxError instead
+  (GH-1141)
+
+* Make function instance .name and .length properties configurable (but
+  non-writable and non-enumerable) to match ES6 requirements; also change
+  .fileName to follow the same attribute convention (GH-1153, GH-1177)
+
+* Remove anonymous function own .name property to match ES6 requirements;
+  anonymous functions inherit an empty string as their name from
+  Function.prototype.name (GH-1183)
+
+* Change functions created using new Function() to have the .name
+  "anonymous" to match ES6 requirements (GH-1183)
+
+* Make Error instance .fileName and .lineNumber properties configurable
+  but non-writable and non-enumerable to match function instance property
+  behavior; this only matters when tracebacks are disabled and concrete
+  error instance properties are in use (GH-1153)
+
+* Change NativeError (TypeError, RangeError, etc) constructor to inherit
+  from the Error constructor rather than Function.prototype directly as
+  required by ES6 (GH-1182)
+
+* Change object literal getter/setter to match ES6 requirements: no automatic
+  .prototype property, and the functions are non-constructable (GH-1188)
+
+* Add a fastint check for duk_put_number_list() values (GH-1086)
+
+* Remove an unintended fastint downgrade check for unary minus executor
+  opcode (fastint downgrade check is intended to be applied to unary plus
+  only) (GH-903)
+
+* Add an fmod() self test (GH-1108)
+
+* Reduce RAM built-ins initdata limitations for custom bindings by using a
+  shared varuint encoding in the bit-packed initdata stream (GH-1151, GH-1152)
+
+* Remove support for refcounting-only (= no mark-and-sweep) memory management
+  option as too error prone: without mark-and-sweep garbage containing
+  reference loops or created during debugger paused state (with or without
+  reference loops) would "leak" until heap destruction (GH-1168)
+
+* Fix JSON stringify fastpath handling of array gaps in JX and JC; they
+  incorrectly stringified as 'null' (like in JSON) instead of 'undefined'
+  and '{"_undef":true}' as intended (GH-859, GH-1149)
+
+* Fix duk_hcompfunc 'data' field != NULL assumptions which might lead to
+  memory unsafe behavior if Duktape ran out of memory when creating a
+  duk_hcompfunc during compilation or function instantiation (GH-1144,
+  GH-1132)
+
+* Fix a few bugs in object property handling (delete property and
+  Object.defineProperty()) where an object property table resize triggered
+  by a finalizer of a previous value could cause memory unsafe behavior
+  (GH-1096)
+
+* Fix Object.prototype.__proto__ handling to use ToObject() coercion rather
+  than requiring an object; this matches ES6 requirements and allows e.g.
+  the expression (123).__proto__ to work (GH-1080)
 
 * Fix String.fromCharCode() behavior for non-BMP characters when standard
   behavior is enabled (DUK_USE_NONSTD_STRING_FROMCHARCODE_32BIT disabled):
@@ -2008,6 +2199,11 @@ Planned
   automatically for AmigaOS on M68K, regardless of OS version or compiler
   (GH-932)
 
+* Fix Cygwin warning about shadowed 'accept' variable (GH-1098)
+
+* Fix Cygwin/MinGW math issues related to pow2() and atan2() semantics
+  (GH-1099)
+
 * Fix two-argument Math function (like Math.atan2()) argument coercion
   order; the order was not guaranteed but specification requires left-to-right
   ordering (GH-943)
@@ -2023,6 +2219,17 @@ Planned
 
 * Fix incorrect duk_hbufferobject size in Duktape.info() (GH-804)
 
+* Fix a few incorrect asserts in refcount code; the asserts didn't check for
+  NULL and cause memory unsafe behavior, but the code itself is correct
+  (GH-1090)
+
+* Fix memory unsafe handling of Object.isPrototypeOf() when the argument
+  given has no prototype (e.g. argument is Object.prototype) (GH-1162,
+  GH-1163)
+
+* Miscellaneous portability improvements: remove dependency on fmin() and
+  fmax() (GH-1072); remove signed shifts in lightfunc handling (GH-1172)
+
 * Internal performance improvement: rework bytecode format to use an 8-bit
   opcode field (and 8-bit A, B, and C fields) to speed up opcode dispatch
   by around 20-25% and avoid a two-level dispatch for EXTRA opcodes; the
@@ -2030,7 +2237,7 @@ Planned
   build is slightly smaller (GH-903)
 
 * Internal performance improvement: add optional fast path for dense arrays in
-  Array.prototype operations like push() and pop() (GH-584)
+  Array.prototype operations like push() and pop() (GH-584, GH-1154)
 
 * Miscellaneous performance improvements: avoid one extra shift when computing
   reg/const pointers in the bytecode executor (GH-674); avoid value stack for
@@ -2039,14 +2246,24 @@ Planned
   opcode handler optimizations (GH-903); refcount optimizations (GH-443,
   GH-973, GH-1042); minor RegExp compile/execute optimizations (GH-974,
   GH-1033); minor IEEE double handling optimizations (GH-1051); precomputed
-  duk_hstring array index (GH-1056)
+  duk_hstring array index (GH-1056); duk_get_{type,type_mask}() optimization
+  (GH-1077); explicit lexenv/varenv fields in duk_hcompfunc struct (GH-1132)
 
 * Miscellaneous footprint improvements: RegExp compiler/executor (GH-977);
   internal duk_dup() variants (GH-990); allow stripping of (almost) all
   built-ins for low memory builds (GH-989); remove internal accessor setup
   helper and use duk_def_prop() instead (GH-1010); minor IEEE double handling
   optimizations (GH-1051); precomputed duk_hstring array index (GH-1056);
-  internal value stack access improvements (GH-1058)
+  internal value stack access improvements (GH-1058); shared bitpacked string
+  format for heap and thread initialization data (GH-1119); explicit
+  lexenv/varenv fields in duk_hcompfunc struct (GH-1132); omit duk_hcompfunc
+  _Formals array when it is safe to do so (GH-1141); omit duk_hcompfunc
+  _Varmap in more cases when it is safe to do so (GH-1146); reduce initial
+  bytecode allocation in Ecmascript compiler for low memory targets (GH-1146);
+  packed arguments for some internal helper calls (GH-1158, GH-1172); misc
+  internal helpers to reduce call site size (GH-1166, GH-1173); config options
+  for function .name and .fileName control (GH-1153); internal helper
+  duk_push_hstring_empty() (GH-1186)
 
 * Internal change: rework shared internal string handling so that shared
   strings are plain string constants used in macro values, rather than
@@ -2064,3 +2281,5 @@ Planned
 * Internal change: rework tagged value (duk_tval) fastint/integer handling
   macros to avoid multiple evaluation of argument(s) and for easier mixing
   of fastint and non-fastint aware code (GH-702)
+
+* Internal change: source code policy changes (GH-1169)

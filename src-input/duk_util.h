@@ -2,7 +2,7 @@
  *  Utilities
  */
 
-#ifndef DUK_UTIL_H_INCLUDED
+#if !defined(DUK_UTIL_H_INCLUDED)
 #define DUK_UTIL_H_INCLUDED
 
 #define DUK_UTIL_MIN_HASH_PRIME  17  /* must match genhashsizes.py */
@@ -14,6 +14,15 @@
 #else
 #define DUK_UTIL_GET_RANDOM_DOUBLE(thr) duk_util_tinyrandom_get_double(thr)
 #endif
+
+/*
+ *  Some useful constants
+ */
+
+#define DUK_DOUBLE_2TO32     4294967296.0
+#define DUK_DOUBLE_2TO31     2147483648.0
+#define DUK_DOUBLE_LOG2E     1.4426950408889634
+#define DUK_DOUBLE_LOG10E    0.4342944819032518
 
 /*
  *  Endian conversion
@@ -44,6 +53,8 @@ struct duk_bitdecoder_ctx {
 	duk_uint32_t currval;
 	duk_small_int_t currbits;
 };
+
+#define DUK_BD_BITPACKED_STRING_MAXLEN 256
 
 /*
  *  Bitstream encoder
@@ -497,9 +508,11 @@ DUK_INTERNAL_DECL duk_uint32_t duk_util_hashbytes(const duk_uint8_t *data, duk_s
 DUK_INTERNAL_DECL duk_uint32_t duk_util_get_hash_prime(duk_uint32_t size);
 #endif
 
-DUK_INTERNAL_DECL duk_int32_t duk_bd_decode(duk_bitdecoder_ctx *ctx, duk_small_int_t bits);
-DUK_INTERNAL_DECL duk_small_int_t duk_bd_decode_flag(duk_bitdecoder_ctx *ctx);
-DUK_INTERNAL_DECL duk_int32_t duk_bd_decode_flagged(duk_bitdecoder_ctx *ctx, duk_small_int_t bits, duk_int32_t def_value);
+DUK_INTERNAL_DECL duk_uint32_t duk_bd_decode(duk_bitdecoder_ctx *ctx, duk_small_int_t bits);
+DUK_INTERNAL_DECL duk_small_uint_t duk_bd_decode_flag(duk_bitdecoder_ctx *ctx);
+DUK_INTERNAL_DECL duk_uint32_t duk_bd_decode_flagged(duk_bitdecoder_ctx *ctx, duk_small_int_t bits, duk_uint32_t def_value);
+DUK_INTERNAL_DECL duk_uint32_t duk_bd_decode_varuint(duk_bitdecoder_ctx *ctx);
+DUK_INTERNAL_DECL duk_small_uint_t duk_bd_decode_bitpacked_string(duk_bitdecoder_ctx *bd, duk_uint8_t *out);
 
 DUK_INTERNAL_DECL void duk_be_encode(duk_bitencoder_ctx *ctx, duk_uint32_t data, duk_small_int_t bits);
 DUK_INTERNAL_DECL void duk_be_finish(duk_bitencoder_ctx *ctx);
@@ -547,5 +560,7 @@ DUK_INTERNAL_DECL duk_bool_t duk_double_is_nan_zero_inf(duk_double_t x);
 DUK_INTERNAL_DECL duk_small_uint_t duk_double_signbit(duk_double_t x);
 DUK_INTERNAL_DECL duk_double_t duk_double_trunc_towards_zero(duk_double_t x);
 DUK_INTERNAL_DECL duk_bool_t duk_double_same_sign(duk_double_t x, duk_double_t y);
+DUK_INTERNAL_DECL duk_double_t duk_double_fmin(duk_double_t x, duk_double_t y);
+DUK_INTERNAL_DECL duk_double_t duk_double_fmax(duk_double_t x, duk_double_t y);
 
 #endif  /* DUK_UTIL_H_INCLUDED */

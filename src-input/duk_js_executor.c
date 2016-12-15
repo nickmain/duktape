@@ -73,15 +73,7 @@ DUK_LOCAL void duk__push_tvals_incref_only(duk_hthread *thr, duk_tval *tv_src, d
  */
 
 DUK_LOCAL DUK__INLINE_PERF duk_double_t duk__compute_mod(duk_double_t d1, duk_double_t d2) {
-	/*
-	 *  Ecmascript modulus ('%') does not match IEEE 754 "remainder"
-	 *  operation (implemented by remainder() in C99) but does seem
-	 *  to match ANSI C fmod().
-	 *
-	 *  Compare E5 Section 11.5.3 and "man fmod".
-	 */
-
-	return (duk_double_t) DUK_FMOD((double) d1, (double) d2);
+	return (duk_double_t) duk_js_arith_mod((double) d1, (double) d2);
 }
 
 #if defined(DUK_USE_ES7_EXP_OPERATOR)
@@ -181,8 +173,8 @@ DUK_LOCAL DUK__INLINE_PERF void duk__vm_arith_add(duk_hthread *thr, duk_tval *tv
 	} else {
 		duk_double_t d1, d2;
 
-		d1 = duk_to_number(ctx, -2);
-		d2 = duk_to_number(ctx, -1);
+		d1 = duk_to_number_m2(ctx);
+		d2 = duk_to_number_m1(ctx);
 		DUK_ASSERT(duk_is_number(ctx, -2));
 		DUK_ASSERT(duk_is_number(ctx, -1));
 		DUK_ASSERT_DOUBLE_IS_NORMALIZED(d1);
@@ -301,8 +293,8 @@ DUK_LOCAL DUK__INLINE_PERF void duk__vm_arith_binary_op(duk_hthread *thr, duk_tv
 	} else {
 		duk_push_tval(ctx, tv_x);
 		duk_push_tval(ctx, tv_y);
-		d1 = duk_to_number(ctx, -2);  /* side effects */
-		d2 = duk_to_number(ctx, -1);
+		d1 = duk_to_number_m2(ctx);  /* side effects */
+		d2 = duk_to_number_m1(ctx);
 		DUK_ASSERT(duk_is_number(ctx, -2));
 		DUK_ASSERT(duk_is_number(ctx, -1));
 		DUK_ASSERT_DOUBLE_IS_NORMALIZED(d1);
@@ -547,7 +539,7 @@ DUK_LOCAL DUK__INLINE_PERF void duk__vm_arith_unary_op(duk_hthread *thr, duk_idx
 		DUK_ASSERT(DUK_DBLUNION_IS_NORMALIZED(&du));
 #if defined(DUK_USE_FASTINT)
 		tv = DUK_GET_TVAL_POSIDX(ctx, idx_dst);
-		DUK_TVAL_SET_NUMBER_CHKFAST_UPDREF(thr, tv, du.d);
+		DUK_TVAL_SET_NUMBER_CHKFAST_UPDREF(thr, tv, du.d);  /* always 'fast', i.e. inlined */
 		return;
 #endif
 	} else {
@@ -739,7 +731,7 @@ DUK_LOCAL DUK__INLINE_PERF void duk__prepost_incdec_var_helper(duk_hthread *thr,
 	 * not intuitive.
 	 */
 
-	x = duk_to_number(ctx, -2);
+	x = duk_to_number_m2(ctx);
 	if (op & 0x01) {
 		y = x - 1.0;
 	} else {
@@ -937,11 +929,10 @@ DUK_LOCAL void duk__handle_catch(duk_hthread *thr, duk_size_t cat_idx, duk_tval 
 		act_lex_env = act->lex_env;
 		act = NULL;  /* invalidated */
 
-		(void) duk_push_object_helper_proto(ctx,
-		                                    DUK_HOBJECT_FLAG_EXTENSIBLE |
-		                                    DUK_HOBJECT_CLASS_AS_FLAGS(DUK_HOBJECT_CLASS_DECENV),
-		                                    act_lex_env);
-		new_env = DUK_GET_HOBJECT_NEGIDX(ctx, -1);
+		new_env = duk_push_object_helper_proto(ctx,
+		                                       DUK_HOBJECT_FLAG_EXTENSIBLE |
+		                                       DUK_HOBJECT_CLASS_AS_FLAGS(DUK_HOBJECT_CLASS_DECENV),
+		                                       act_lex_env);
 		DUK_ASSERT(new_env != NULL);
 		DUK_DDD(DUK_DDDPRINT("new_env allocated: %!iO", (duk_heaphdr *) new_env));
 
@@ -1104,8 +1095,6 @@ duk_small_uint_t duk__handle_longjmp(duk_hthread *thr,
 		DUK_ASSERT(DUK_ACT_GET_FUNC(thr->callstack + thr->callstack_top - 1) != NULL &&
 		           DUK_HOBJECT_IS_NATFUNC(DUK_ACT_GET_FUNC(thr->callstack + thr->callstack_top - 1)) &&
 		           ((duk_hnatfunc *) DUK_ACT_GET_FUNC(thr->callstack + thr->callstack_top - 1))->func == duk_bi_thread_resume);
-		DUK_ASSERT(DUK_ACT_GET_FUNC(thr->callstack + thr->callstack_top - 2) != NULL &&
-		           DUK_HOBJECT_IS_COMPFUNC(DUK_ACT_GET_FUNC(thr->callstack + thr->callstack_top - 2)));      /* an Ecmascript function */
 		DUK_ASSERT_DISABLE((thr->callstack + thr->callstack_top - 2)->idx_retval >= 0);                              /* unsigned */
 
 		tv = &thr->heap->lj.value2;  /* resumee */
@@ -1124,17 +1113,10 @@ duk_small_uint_t duk__handle_longjmp(duk_hthread *thr,
 		           (DUK_ACT_GET_FUNC(resumee->callstack + resumee->callstack_top - 1) != NULL &&
 		            DUK_HOBJECT_IS_NATFUNC(DUK_ACT_GET_FUNC(resumee->callstack + resumee->callstack_top - 1)) &&
 		            ((duk_hnatfunc *) DUK_ACT_GET_FUNC(resumee->callstack + resumee->callstack_top - 1))->func == duk_bi_thread_yield));
-		DUK_ASSERT(resumee->state != DUK_HTHREAD_STATE_YIELDED ||
-		           (DUK_ACT_GET_FUNC(resumee->callstack + resumee->callstack_top - 2) != NULL &&
-		            DUK_HOBJECT_IS_COMPFUNC(DUK_ACT_GET_FUNC(resumee->callstack + resumee->callstack_top - 2))));      /* an Ecmascript function */
 		DUK_ASSERT_DISABLE(resumee->state != DUK_HTHREAD_STATE_YIELDED ||
 		           (resumee->callstack + resumee->callstack_top - 2)->idx_retval >= 0);                              /* idx_retval unsigned */
 		DUK_ASSERT(resumee->state != DUK_HTHREAD_STATE_INACTIVE ||
 		           resumee->callstack_top == 0);                                                                     /* INACTIVE: no activation, single function value on valstack */
-		DUK_ASSERT(resumee->state != DUK_HTHREAD_STATE_INACTIVE ||
-		           (resumee->valstack_top == resumee->valstack + 1 &&
-		            DUK_TVAL_IS_OBJECT(resumee->valstack_top - 1) &&
-		            DUK_HOBJECT_IS_COMPFUNC(DUK_TVAL_GET_OBJECT(resumee->valstack_top - 1))));
 
 		if (thr->heap->lj.iserror) {
 			/*
@@ -1205,7 +1187,11 @@ duk_small_uint_t duk__handle_longjmp(duk_hthread *thr,
 			                                      1,              /* num_stack_args */
 			                                      call_flags);    /* call_flags */
 			if (setup_rc == 0) {
-				/* Shouldn't happen but check anyway. */
+				/* This shouldn't happen; Duktape.Thread.resume()
+				 * should make sure of that.  If it does happen
+				 * this internal error will propagate out of the
+				 * executor which can be quite misleading.
+				 */
 				DUK_ERROR_INTERNAL(thr);
 			}
 
@@ -1531,7 +1517,7 @@ DUK_LOCAL duk_small_uint_t duk__handle_return(duk_hthread *thr,
 	DUK_ASSERT(entry_thread != NULL);
 	DUK_ASSERT(thr->valstack_top - 1 >= thr->valstack_bottom);
 	tv1 = thr->valstack_top - 1;
-	DUK_TVAL_CHKFAST_INPLACE(tv1);  /* fastint downgrade check for return values */
+	DUK_TVAL_CHKFAST_INPLACE_FAST(tv1);  /* fastint downgrade check for return values */
 
 	/*
 	 *  Four possible outcomes:
@@ -2226,7 +2212,7 @@ DUK_LOCAL void duk__executor_recheck_debugger(duk_hthread *thr, duk_activation *
 #define DUK__REGCONSTP_C(ins)  ((((ins) & DUK__RCBIT_C) ? consts : thr->valstack_bottom) + DUK_DEC_C((ins)))
 #endif  /* DUK_USE_EXEC_REGCONST_OPTIMIZE */
 
-#ifdef DUK_USE_VERBOSE_EXECUTOR_ERRORS
+#if defined(DUK_USE_VERBOSE_EXECUTOR_ERRORS)
 #define DUK__INTERNAL_ERROR(msg)  do { \
 		DUK_ERROR_ERROR(thr, (msg)); \
 	} while (0)
@@ -2439,11 +2425,11 @@ DUK_LOCAL DUK_NOINLINE void duk__js_execute_bytecode_inner(duk_hthread *entry_th
 	/* 'fun' is quite rarely used, so no local for it */
 #endif
 
-#ifdef DUK_USE_INTERRUPT_COUNTER
+#if defined(DUK_USE_INTERRUPT_COUNTER)
 	duk_int_t int_ctr;
 #endif
 
-#ifdef DUK_USE_ASSERTIONS
+#if defined(DUK_USE_ASSERTIONS)
 	duk_size_t valstack_top_base;    /* valstack top, should match before interpreting each op (no leftovers) */
 #endif
 
@@ -2537,7 +2523,7 @@ DUK_LOCAL DUK_NOINLINE void duk__js_execute_bytecode_inner(duk_hthread *entry_th
 		}
 #endif  /* DUK_USE_DEBUGGER_SUPPORT */
 
-#ifdef DUK_USE_ASSERTIONS
+#if defined(DUK_USE_ASSERTIONS)
 		valstack_top_base = (duk_size_t) (thr->valstack_top - thr->valstack);
 #endif
 
@@ -2886,7 +2872,7 @@ DUK_LOCAL DUK_NOINLINE void duk__js_execute_bytecode_inner(duk_hthread *entry_th
 
 			tv = DUK__REGP_BC(ins);
 			stridx = duk_js_typeof_stridx(tv);
-			DUK_ASSERT(stridx >= 0 && stridx < DUK_HEAP_NUM_STRINGS);
+			DUK_ASSERT_STRIDX_VALID(stridx);
 			h_str = DUK_HTHREAD_GET_STRING(thr, stridx);
 			tv = DUK__REGP_A(ins);
 			DUK_TVAL_SET_STRING_UPDREF(thr, tv, h_str);
@@ -2923,7 +2909,7 @@ DUK_LOCAL DUK_NOINLINE void duk__js_execute_bytecode_inner(duk_hthread *entry_th
 				/* unresolvable, no stack changes */
 				stridx = DUK_STRIDX_LC_UNDEFINED;
 			}
-			DUK_ASSERT(stridx >= 0 && stridx < DUK_HEAP_NUM_STRINGS);
+			DUK_ASSERT_STRIDX_VALID(stridx);
 #if defined(DUK_USE_EXEC_PREFER_SIZE)
 			duk_push_hstring_stridx(ctx, stridx);
 			DUK__REPLACE_TOP_A_BREAK();
@@ -3528,7 +3514,7 @@ DUK_LOCAL DUK_NOINLINE void duk__js_execute_bytecode_inner(duk_hthread *entry_th
 			 * not intuitive.
 			 */
 
-			x = duk_to_number(ctx, -1);
+			x = duk_to_number_m1(ctx);
 			duk_pop(ctx);
 			if (ins & DUK_BC_INCDECP_FLAG_DEC) {
 				y = x - 1.0;
@@ -4060,8 +4046,8 @@ DUK_LOCAL DUK_NOINLINE void duk__js_execute_bytecode_inner(duk_hthread *entry_th
 				/* [ ... env target ] */
 				/* [ ... env target target ] */
 
-				duk_xdef_prop_stridx(thr, -3, DUK_STRIDX_INT_TARGET, DUK_PROPDESC_FLAGS_NONE);
-				duk_xdef_prop_stridx(thr, -2, DUK_STRIDX_INT_THIS, DUK_PROPDESC_FLAGS_NONE);  /* always provideThis=true */
+				duk_xdef_prop_stridx_short(thr, -3, DUK_STRIDX_INT_TARGET, DUK_PROPDESC_FLAGS_NONE);
+				duk_xdef_prop_stridx_short(thr, -2, DUK_STRIDX_INT_THIS, DUK_PROPDESC_FLAGS_NONE);  /* always provideThis=true */
 
 				/* [ ... env ] */
 
@@ -5042,7 +5028,7 @@ DUK_LOCAL DUK_NOINLINE void duk__js_execute_bytecode_inner(duk_hthread *entry_th
 	}
 	DUK_UNREACHABLE();
 
-#ifndef DUK_USE_VERBOSE_EXECUTOR_ERRORS
+#if !defined(DUK_USE_VERBOSE_EXECUTOR_ERRORS)
  internal_error:
 	DUK_ERROR_INTERNAL(thr);
 #endif

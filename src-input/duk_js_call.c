@@ -142,15 +142,20 @@ DUK_LOCAL void duk__create_arguments_object(duk_hthread *thr,
 	DUK_ASSERT(i_argbase >= 0);
 
 	duk_push_hobject(ctx, func);
-	duk_get_prop_stridx(ctx, -1, DUK_STRIDX_INT_FORMALS);
+	duk_get_prop_stridx_short(ctx, -1, DUK_STRIDX_INT_FORMALS);
 	formals = duk_get_hobject(ctx, -1);
-	n_formals = 0;
 	if (formals) {
-		duk_get_prop_stridx(ctx, -1, DUK_STRIDX_LENGTH);
-		n_formals = (duk_idx_t) duk_require_int(ctx, -1);
-		duk_pop(ctx);
+		n_formals = (duk_idx_t) duk_get_length(ctx, -1);
+	} else {
+		/* This shouldn't happen without tampering of internal
+		 * properties: if a function accesses 'arguments', _Formals
+		 * is kept.  Check for the case anyway in case internal
+		 * properties have been modified manually.
+		 */
+		DUK_D(DUK_DPRINT("_Formals is undefined when creating arguments, use n_formals == 0"));
+		n_formals = 0;
 	}
-	duk_remove(ctx, -2);  /* leave formals on stack for later use */
+	duk_remove_m2(ctx);  /* leave formals on stack for later use */
 	i_formals = duk_require_top_index(ctx);
 
 	DUK_ASSERT(n_formals >= 0);
@@ -169,25 +174,23 @@ DUK_LOCAL void duk__create_arguments_object(duk_hthread *thr,
 	 *    - 'mappedNames' object: temporary value used during construction
 	 */
 
-	i_arg = duk_push_object_helper(ctx,
-	                               DUK_HOBJECT_FLAG_EXTENSIBLE |
-	                               DUK_HOBJECT_FLAG_ARRAY_PART |
-	                               DUK_HOBJECT_CLASS_AS_FLAGS(DUK_HOBJECT_CLASS_ARGUMENTS),
-	                               DUK_BIDX_OBJECT_PROTOTYPE);
-	DUK_ASSERT(i_arg >= 0);
-	arg = duk_known_hobject(ctx, -1);
-
-	i_map = duk_push_object_helper(ctx,
-	                               DUK_HOBJECT_FLAG_EXTENSIBLE |
-	                               DUK_HOBJECT_CLASS_AS_FLAGS(DUK_HOBJECT_CLASS_OBJECT),
-	                               -1);  /* no prototype */
-	DUK_ASSERT(i_map >= 0);
-
-	i_mappednames = duk_push_object_helper(ctx,
-	                                       DUK_HOBJECT_FLAG_EXTENSIBLE |
-	                                       DUK_HOBJECT_CLASS_AS_FLAGS(DUK_HOBJECT_CLASS_OBJECT),
-	                                       -1);  /* no prototype */
-	DUK_ASSERT(i_mappednames >= 0);
+	arg = duk_push_object_helper(ctx,
+	                             DUK_HOBJECT_FLAG_EXTENSIBLE |
+	                             DUK_HOBJECT_FLAG_ARRAY_PART |
+	                             DUK_HOBJECT_CLASS_AS_FLAGS(DUK_HOBJECT_CLASS_ARGUMENTS),
+	                             DUK_BIDX_OBJECT_PROTOTYPE);
+	DUK_ASSERT(arg != NULL);
+	(void) duk_push_object_helper(ctx,
+	                              DUK_HOBJECT_FLAG_EXTENSIBLE |
+	                              DUK_HOBJECT_CLASS_AS_FLAGS(DUK_HOBJECT_CLASS_OBJECT),
+	                              -1);  /* no prototype */
+	(void) duk_push_object_helper(ctx,
+	                              DUK_HOBJECT_FLAG_EXTENSIBLE |
+	                              DUK_HOBJECT_CLASS_AS_FLAGS(DUK_HOBJECT_CLASS_OBJECT),
+	                              -1);  /* no prototype */
+	i_arg = duk_get_top(ctx) - 3;
+	i_map = i_arg + 1;
+	i_mappednames = i_arg + 2;
 
 	/* [ ... formals arguments map mappedNames ] */
 
@@ -347,7 +350,7 @@ DUK_LOCAL void duk__create_arguments_object(duk_hthread *thr,
 	/* [ args(n) [crud] formals arguments map mappednames ] */
 
 	duk_pop_2(ctx);
-	duk_remove(ctx, -2);
+	duk_remove_m2(ctx);
 
 	/* [ args [crud] arguments ] */
 }
@@ -380,11 +383,11 @@ DUK_LOCAL void duk__handle_createargs_for_call(duk_hthread *thr,
 
 	/* [ ... arg1 ... argN envobj argobj ] */
 
-	duk_xdef_prop_stridx(ctx,
-	                     -2,
-	                     DUK_STRIDX_LC_ARGUMENTS,
-	                     DUK_HOBJECT_HAS_STRICT(func) ? DUK_PROPDESC_FLAGS_E :   /* strict: non-deletable, non-writable */
-	                                                    DUK_PROPDESC_FLAGS_WE);  /* non-strict: non-deletable, writable */
+	duk_xdef_prop_stridx_short(ctx,
+	                           -2,
+	                           DUK_STRIDX_LC_ARGUMENTS,
+	                           DUK_HOBJECT_HAS_STRICT(func) ? DUK_PROPDESC_FLAGS_E :   /* strict: non-deletable, non-writable */
+	                                                          DUK_PROPDESC_FLAGS_WE);  /* non-strict: non-deletable, writable */
 	/* [ ... arg1 ... argN envobj ] */
 }
 
@@ -467,7 +470,7 @@ DUK_LOCAL void duk__handle_bound_chain_for_call(duk_hthread *thr,
 
 		/* XXX: duk_get_length? */
 		duk_get_prop_stridx(ctx, idx_func, DUK_STRIDX_INT_ARGS);  /* -> [ ... func this arg1 ... argN _Args ] */
-		duk_get_prop_stridx(ctx, -1, DUK_STRIDX_LENGTH);          /* -> [ ... func this arg1 ... argN _Args length ] */
+		duk_get_prop_stridx_short(ctx, -1, DUK_STRIDX_LENGTH);          /* -> [ ... func this arg1 ... argN _Args length ] */
 		len = (duk_idx_t) duk_require_int(ctx, -1);
 		duk_pop(ctx);
 		for (i = 0; i < len; i++) {
@@ -522,35 +525,27 @@ DUK_LOCAL void duk__handle_bound_chain_for_call(duk_hthread *thr,
 DUK_LOCAL void duk__handle_oldenv_for_call(duk_hthread *thr,
                                            duk_hobject *func,
                                            duk_activation *act) {
-	duk_tval *tv;
+	duk_hcompfunc *f;
+	duk_hobject *h_lex;
+	duk_hobject *h_var;
 
 	DUK_ASSERT(thr != NULL);
 	DUK_ASSERT(func != NULL);
 	DUK_ASSERT(act != NULL);
 	DUK_ASSERT(!DUK_HOBJECT_HAS_NEWENV(func));
 	DUK_ASSERT(!DUK_HOBJECT_HAS_CREATEARGS(func));
+	DUK_ASSERT(DUK_HOBJECT_IS_COMPFUNC(func));
+	DUK_UNREF(thr);
 
-	tv = duk_hobject_find_existing_entry_tval_ptr(thr->heap, func, DUK_HTHREAD_STRING_INT_LEXENV(thr));
-	if (tv) {
-		DUK_ASSERT(DUK_TVAL_IS_OBJECT(tv));
-		DUK_ASSERT(DUK_HOBJECT_IS_ENV(DUK_TVAL_GET_OBJECT(tv)));
-		act->lex_env = DUK_TVAL_GET_OBJECT(tv);
-
-		tv = duk_hobject_find_existing_entry_tval_ptr(thr->heap, func, DUK_HTHREAD_STRING_INT_VARENV(thr));
-		if (tv) {
-			DUK_ASSERT(DUK_TVAL_IS_OBJECT(tv));
-			DUK_ASSERT(DUK_HOBJECT_IS_ENV(DUK_TVAL_GET_OBJECT(tv)));
-			act->var_env = DUK_TVAL_GET_OBJECT(tv);
-		} else {
-			act->var_env = act->lex_env;
-		}
-	} else {
-		act->lex_env = thr->builtins[DUK_BIDX_GLOBAL_ENV];
-		act->var_env = act->lex_env;
-	}
-
-	DUK_HOBJECT_INCREF_ALLOWNULL(thr, act->lex_env);
-	DUK_HOBJECT_INCREF_ALLOWNULL(thr, act->var_env);
+	f = (duk_hcompfunc *) func;
+	h_lex = DUK_HCOMPFUNC_GET_LEXENV(thr->heap, f);
+	h_var = DUK_HCOMPFUNC_GET_VARENV(thr->heap, f);
+	DUK_ASSERT(h_lex != NULL);  /* Always true for closures (not for templates) */
+	DUK_ASSERT(h_var != NULL);
+	act->lex_env = h_lex;
+	act->var_env = h_var;
+	DUK_HOBJECT_INCREF(thr, h_lex);
+	DUK_HOBJECT_INCREF(thr, h_var);
 }
 
 /*
@@ -1598,7 +1593,7 @@ DUK_LOCAL void duk__handle_call_inner(duk_hthread *thr,
 		tv_funret = thr->valstack_top - 1;
 #if defined(DUK_USE_FASTINT)
 		/* Explicit check for fastint downgrade. */
-		DUK_TVAL_CHKFAST_INPLACE(tv_funret);
+		DUK_TVAL_CHKFAST_INPLACE_FAST(tv_funret);
 #endif
 		DUK_TVAL_SET_TVAL_UPDREF(thr, tv_ret, tv_funret);  /* side effects */
 	} else {
@@ -1663,7 +1658,7 @@ DUK_LOCAL void duk__handle_call_inner(duk_hthread *thr,
 			tv_funret = thr->valstack_top - 1;
 #if defined(DUK_USE_FASTINT)
 			/* Explicit check for fastint downgrade. */
-			DUK_TVAL_CHKFAST_INPLACE(tv_funret);
+			DUK_TVAL_CHKFAST_INPLACE_FAST(tv_funret);
 #endif
 			DUK_TVAL_SET_TVAL_UPDREF(thr, tv_ret, tv_funret);  /* side effects */
 		}
@@ -1787,7 +1782,7 @@ DUK_LOCAL void duk__handle_call_error(duk_hthread *thr,
 	DUK_TVAL_SET_TVAL_UPDREF(thr, tv_ret, &thr->heap->lj.value1);  /* side effects */
 #if defined(DUK_USE_FASTINT)
 	/* Explicit check for fastint downgrade. */
-	DUK_TVAL_CHKFAST_INPLACE(tv_ret);
+	DUK_TVAL_CHKFAST_INPLACE_FAST(tv_ret);
 #endif
 	duk_set_top(ctx, idx_func + 1);  /* XXX: could be eliminated with valstack adjust */
 

@@ -151,6 +151,8 @@ DUK_LOCAL duk_double_t duk__tonumber_string_raw(duk_hthread *thr) {
 	duk_small_uint_t s2n_flags;
 	duk_double_t d;
 
+	DUK_ASSERT(duk_is_string(ctx, -1));
+
 	/* Quite lenient, e.g. allow empty as zero, but don't allow trailing
 	 * garbage.
 	 */
@@ -164,9 +166,12 @@ DUK_LOCAL duk_double_t duk__tonumber_string_raw(duk_hthread *thr) {
 	            DUK_S2N_FLAG_ALLOW_EMPTY_FRAC |
 	            DUK_S2N_FLAG_ALLOW_EMPTY_AS_ZERO |
 	            DUK_S2N_FLAG_ALLOW_LEADING_ZERO |
-	            DUK_S2N_FLAG_ALLOW_AUTO_HEX_INT;
+	            DUK_S2N_FLAG_ALLOW_AUTO_HEX_INT |
+	            DUK_S2N_FLAG_ALLOW_AUTO_OCT_INT |
+	            DUK_S2N_FLAG_ALLOW_AUTO_BIN_INT;
 
 	duk_numconv_parse(ctx, 10 /*radix*/, s2n_flags);
+
 #if defined(DUK_USE_PREFER_SIZE)
 	d = duk_get_number(ctx, -1);
 	duk_pop(ctx);
@@ -634,7 +639,7 @@ DUK_INTERNAL duk_bool_t duk_js_equals_helper(duk_hthread *thr, duk_tval *tv_x, d
 		duk_double_t d1, d2;
 		d2 = DUK_TVAL_GET_NUMBER(tv_y);
 		duk_push_tval(ctx, tv_x);
-		duk_to_number(ctx, -1);
+		duk_to_number_m1(ctx);
 		d1 = duk_require_number(ctx, -1);
 		duk_pop(ctx);
 		return duk__js_equals_number(d1, d2);
@@ -936,15 +941,15 @@ DUK_INTERNAL duk_bool_t duk_js_compare_helper(duk_hthread *thr, duk_tval *tv_x, 
 		/* Ordering should not matter (E5 Section 11.8.5, step 3.a). */
 #if 0
 		if (flags & DUK_COMPARE_FLAG_EVAL_LEFT_FIRST) {
-			d1 = duk_to_number(ctx, -2);
-			d2 = duk_to_number(ctx, -1);
+			d1 = duk_to_number_m2(ctx);
+			d2 = duk_to_number_m1(ctx);
 		} else {
-			d2 = duk_to_number(ctx, -1);
-			d1 = duk_to_number(ctx, -2);
+			d2 = duk_to_number_m1(ctx);
+			d1 = duk_to_number_m2(ctx);
 		}
 #endif
-		d1 = duk_to_number(ctx, -2);
-		d2 = duk_to_number(ctx, -1);
+		d1 = duk_to_number_m2(ctx);
+		d2 = duk_to_number_m1(ctx);
 
 		/* We want to duk_pop_2(ctx); because the values are numbers
 		 * no decref check is needed.
@@ -1042,7 +1047,7 @@ DUK_INTERNAL duk_bool_t duk_js_instanceof(duk_hthread *thr, duk_tval *tv_x, duk_
 
 		/* [ ... lval rval ] */
 
-		duk_get_prop_stridx(ctx, -1, DUK_STRIDX_INT_TARGET);         /* -> [ ... lval rval new_rval ] */
+		duk_get_prop_stridx_short(ctx, -1, DUK_STRIDX_INT_TARGET);         /* -> [ ... lval rval new_rval ] */
 		duk_replace(ctx, -1);                                        /* -> [ ... lval new_rval ] */
 		func = duk_require_hobject(ctx, -1);
 
@@ -1092,7 +1097,7 @@ DUK_INTERNAL duk_bool_t duk_js_instanceof(duk_hthread *thr, duk_tval *tv_x, duk_
 	}
 	DUK_ASSERT(val != NULL);  /* Loop doesn't actually rely on this. */
 
-	duk_get_prop_stridx(ctx, -1, DUK_STRIDX_PROTOTYPE);  /* -> [ ... lval rval rval.prototype ] */
+	duk_get_prop_stridx_short(ctx, -1, DUK_STRIDX_PROTOTYPE);  /* -> [ ... lval rval rval.prototype ] */
 	proto = duk_require_hobject(ctx, -1);
 	duk_pop(ctx);  /* -> [ ... lval rval ] */
 
@@ -1267,7 +1272,7 @@ DUK_INTERNAL duk_small_uint_t duk_js_typeof_stridx(duk_tval *tv_x) {
 	}
 	}
 
-	DUK_ASSERT(stridx >= 0 && stridx < DUK_HEAP_NUM_STRINGS);
+	DUK_ASSERT_STRIDX_VALID(stridx);
 	return stridx;
 }
 

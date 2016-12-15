@@ -4,9 +4,9 @@
 
 #include "duk_internal.h"
 
-#ifdef DUK_USE_REFERENCE_COUNTING
+#if defined(DUK_USE_REFERENCE_COUNTING)
 
-#ifndef DUK_USE_DOUBLE_LINKED_HEAP
+#if !defined(DUK_USE_DOUBLE_LINKED_HEAP)
 #error internal error, reference counting requires a double linked heap
 #endif
 
@@ -85,10 +85,10 @@ DUK_LOCAL void duk__refcount_finalize_hobject(duk_hthread *thr, duk_hobject *h) 
 		if (p_flag[n] & DUK_PROPDESC_FLAG_ACCESSOR) {
 			duk_hobject *h_getset;
 			h_getset = p_val[n].a.get;
-			DUK_ASSERT(DUK_HEAPHDR_IS_OBJECT((duk_heaphdr *) h_getset));
+			DUK_ASSERT(h_getset == NULL || DUK_HEAPHDR_IS_OBJECT((duk_heaphdr *) h_getset));
 			DUK_HOBJECT_DECREF_NORZ_ALLOWNULL(thr, h_getset);
 			h_getset = p_val[n].a.set;
-			DUK_ASSERT(DUK_HEAPHDR_IS_OBJECT((duk_heaphdr *) h_getset));
+			DUK_ASSERT(h_getset == NULL || DUK_HEAPHDR_IS_OBJECT((duk_heaphdr *) h_getset));
 			DUK_HOBJECT_DECREF_NORZ_ALLOWNULL(thr, h_getset);
 		} else {
 			duk_tval *tv_val;
@@ -125,26 +125,31 @@ DUK_LOCAL void duk__refcount_finalize_hobject(duk_hthread *thr, duk_hobject *h) 
 		duk_tval *tv, *tv_end;
 		duk_hobject **funcs, **funcs_end;
 
-		DUK_ASSERT(DUK_HCOMPFUNC_GET_DATA(thr->heap, f) != NULL);  /* compiled functions must be created 'atomically' */
+		if (DUK_HCOMPFUNC_GET_DATA(thr->heap, f) != NULL) {
+			tv = DUK_HCOMPFUNC_GET_CONSTS_BASE(thr->heap, f);
+			tv_end = DUK_HCOMPFUNC_GET_CONSTS_END(thr->heap, f);
+			while (tv < tv_end) {
+				DUK_TVAL_DECREF_NORZ(thr, tv);
+				tv++;
+			}
 
-		tv = DUK_HCOMPFUNC_GET_CONSTS_BASE(thr->heap, f);
-		tv_end = DUK_HCOMPFUNC_GET_CONSTS_END(thr->heap, f);
-		while (tv < tv_end) {
-			DUK_TVAL_DECREF_NORZ(thr, tv);
-			tv++;
+			funcs = DUK_HCOMPFUNC_GET_FUNCS_BASE(thr->heap, f);
+			funcs_end = DUK_HCOMPFUNC_GET_FUNCS_END(thr->heap, f);
+			while (funcs < funcs_end) {
+				duk_hobject *h_func;
+				h_func = *funcs;
+				DUK_ASSERT(DUK_HEAPHDR_IS_OBJECT((duk_heaphdr *) h_func));
+				DUK_HCOMPFUNC_DECREF_NORZ(thr, (duk_hcompfunc *) h_func);
+				funcs++;
+			}
+		} else {
+			/* May happen in some out-of-memory corner cases. */
+			DUK_D(DUK_DPRINT("duk_hcompfunc 'data' is NULL, skipping decref"));
 		}
 
-		funcs = DUK_HCOMPFUNC_GET_FUNCS_BASE(thr->heap, f);
-		funcs_end = DUK_HCOMPFUNC_GET_FUNCS_END(thr->heap, f);
-		while (funcs < funcs_end) {
-			duk_hobject *h_func;
-			h_func = *funcs;
-			DUK_ASSERT(DUK_HEAPHDR_IS_OBJECT((duk_heaphdr *) h_func));
-			DUK_HCOMPFUNC_DECREF_NORZ(thr, (duk_hcompfunc *) h_func);
-			funcs++;
-		}
-
-		DUK_HBUFFER_DECREF(thr, (duk_hbuffer *) DUK_HCOMPFUNC_GET_DATA(thr->heap, f));
+		DUK_HEAPHDR_DECREF_ALLOWNULL(thr, (duk_heaphdr *) DUK_HCOMPFUNC_GET_LEXENV(thr->heap, f));
+		DUK_HEAPHDR_DECREF_ALLOWNULL(thr, (duk_heaphdr *) DUK_HCOMPFUNC_GET_VARENV(thr->heap, f));
+		DUK_HEAPHDR_DECREF_ALLOWNULL(thr, (duk_hbuffer *) DUK_HCOMPFUNC_GET_DATA(thr->heap, f));
 	} else if (DUK_HOBJECT_IS_NATFUNC(h)) {
 		duk_hnatfunc *f = (duk_hnatfunc *) h;
 		DUK_UNREF(f);
@@ -171,7 +176,7 @@ DUK_LOCAL void duk__refcount_finalize_hobject(duk_hthread *thr, duk_hobject *h) 
 			DUK_HOBJECT_DECREF_NORZ_ALLOWNULL(thr, (duk_hobject *) DUK_ACT_GET_FUNC(act));
 			DUK_HOBJECT_DECREF_NORZ_ALLOWNULL(thr, (duk_hobject *) act->var_env);
 			DUK_HOBJECT_DECREF_NORZ_ALLOWNULL(thr, (duk_hobject *) act->lex_env);
-#ifdef DUK_USE_NONSTD_FUNC_CALLER_PROPERTY
+#if defined(DUK_USE_NONSTD_FUNC_CALLER_PROPERTY)
 			DUK_HOBJECT_DECREF_NORZ_ALLOWNULL(thr, (duk_hobject *) act->prev_caller);
 #endif
 		}
@@ -424,7 +429,7 @@ DUK_INTERNAL void duk_refzero_free_pending(duk_hthread *thr) {
 	 *  a voluntary mark-and-sweep.
 	 */
 
-#if defined(DUK_USE_MARK_AND_SWEEP) && defined(DUK_USE_VOLUNTARY_GC)
+#if defined(DUK_USE_VOLUNTARY_GC)
 	/* 'count' is more or less comparable to normal trigger counter update
 	 * which happens in memory block (re)allocation.
 	 */
@@ -437,7 +442,7 @@ DUK_INTERNAL void duk_refzero_free_pending(duk_hthread *thr) {
 		DUK_UNREF(rc);
 		DUK_D(DUK_DPRINT("refcount triggered mark-and-sweep => rc %ld", (long) rc));
 	}
-#endif  /* DUK_USE_MARK_AND_SWEEP && DUK_USE_VOLUNTARY_GC */
+#endif  /* DUK_USE_VOLUNTARY_GC */
 }
 
 /*

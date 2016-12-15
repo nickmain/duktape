@@ -60,7 +60,11 @@
 #define DUK__MAX_TEMPS                    0xffffL
 
 /* Initial bytecode size allocation. */
+#if defined(DUK_USE_PREFER_SIZE)
+#define DUK__BC_INITIAL_INSTS             16
+#else
 #define DUK__BC_INITIAL_INSTS             256
+#endif
 
 #define DUK__RECURSION_INCREASE(comp_ctx,thr)  do { \
 		DUK_DDD(DUK_DDDPRINT("RECURSION INCREASE: %s:%ld", (const char *) DUK_FILE_MACRO, (long) DUK_LINE_MACRO)); \
@@ -103,7 +107,7 @@ DUK_LOCAL_DECL void duk__advance(duk_compiler_ctx *ctx);
 DUK_LOCAL_DECL void duk__init_func_valstack_slots(duk_compiler_ctx *comp_ctx);
 DUK_LOCAL_DECL void duk__reset_func_for_pass2(duk_compiler_ctx *comp_ctx);
 DUK_LOCAL_DECL void duk__init_varmap_and_prologue_for_pass2(duk_compiler_ctx *comp_ctx, duk_reg_t *out_stmt_value_reg);
-DUK_LOCAL_DECL void duk__convert_to_func_template(duk_compiler_ctx *comp_ctx, duk_bool_t force_no_namebind);
+DUK_LOCAL_DECL void duk__convert_to_func_template(duk_compiler_ctx *comp_ctx, duk_small_uint_t flags);
 DUK_LOCAL_DECL duk_int_t duk__cleanup_varmap(duk_compiler_ctx *comp_ctx);
 
 /* code emission */
@@ -231,8 +235,12 @@ DUK_LOCAL_DECL void duk__parse_stmts(duk_compiler_ctx *comp_ctx, duk_bool_t allo
 
 DUK_LOCAL_DECL void duk__parse_func_body(duk_compiler_ctx *comp_ctx, duk_bool_t expect_eof, duk_bool_t implicit_return_value, duk_small_int_t expect_token);
 DUK_LOCAL_DECL void duk__parse_func_formals(duk_compiler_ctx *comp_ctx);
-DUK_LOCAL_DECL void duk__parse_func_like_raw(duk_compiler_ctx *comp_ctx, duk_bool_t is_decl, duk_bool_t is_setget);
-DUK_LOCAL_DECL duk_int_t duk__parse_func_like_fnum(duk_compiler_ctx *comp_ctx, duk_bool_t is_decl, duk_bool_t is_setget);
+DUK_LOCAL_DECL void duk__parse_func_like_raw(duk_compiler_ctx *comp_ctx, duk_small_uint_t flags);
+DUK_LOCAL_DECL duk_int_t duk__parse_func_like_fnum(duk_compiler_ctx *comp_ctx, duk_small_uint_t flags);
+
+#define DUK__FUNC_FLAG_DECL            (1 << 0)   /* Parsing a function declaration. */
+#define DUK__FUNC_FLAG_GETSET          (1 << 1)   /* Parsing a getter/setter. */
+#define DUK__FUNC_FLAG_PUSHNAME_PASS1  (1 << 2)   /* Push function name when creating template (first pass only). */
 
 /*
  *  Parser control values for tokens.  The token table is ordered by the
@@ -507,7 +515,7 @@ DUK_LOCAL void duk__init_func_valstack_slots(duk_compiler_ctx *comp_ctx) {
 	entry_top = duk_get_top(ctx);
 
 	DUK_MEMZERO(func, sizeof(*func));  /* intentional overlap with earlier memzero */
-#ifdef DUK_USE_EXPLICIT_NULL_INIT
+#if defined(DUK_USE_EXPLICIT_NULL_INIT)
 	func->h_name = NULL;
 	func->h_consts = NULL;
 	func->h_funcs = NULL;
@@ -555,7 +563,7 @@ DUK_LOCAL void duk__init_func_valstack_slots(duk_compiler_ctx *comp_ctx) {
 	func->h_argnames = DUK_GET_HOBJECT_POSIDX(ctx, entry_top + 6);
 	DUK_ASSERT(func->h_argnames != NULL);
 
-	duk_push_object_internal(ctx);
+	duk_push_bare_object(ctx);
 	func->varmap_idx = entry_top + 7;
 	func->h_varmap = DUK_GET_HOBJECT_POSIDX(ctx, entry_top + 7);
 	DUK_ASSERT(func->h_varmap != NULL);
@@ -581,7 +589,7 @@ DUK_LOCAL void duk__reset_func_for_pass2(duk_compiler_ctx *comp_ctx) {
 	/* keep func->h_argnames; it is fixed for all passes */
 
 	/* truncated in case pass 3 needed */
-	duk_push_object_internal(ctx);
+	duk_push_bare_object(ctx);
 	duk_replace(ctx, func->varmap_idx);
 	func->h_varmap = DUK_GET_HOBJECT_POSIDX(ctx, func->varmap_idx);
 	DUK_ASSERT(func->h_varmap != NULL);
@@ -632,16 +640,16 @@ DUK_LOCAL duk_int_t duk__cleanup_varmap(duk_compiler_ctx *comp_ctx) {
 		}
 	}
 
-	duk_compact(ctx, -1);
+	duk_compact_m1(ctx);
 
 	return ret;
 }
 
-/* convert duk_compiler_func into a function template, leaving the result
+/* Convert duk_compiler_func into a function template, leaving the result
  * on top of stack.
  */
 /* XXX: awkward and bloated asm -- use faster internal accesses */
-DUK_LOCAL void duk__convert_to_func_template(duk_compiler_ctx *comp_ctx, duk_bool_t force_no_namebind) {
+DUK_LOCAL void duk__convert_to_func_template(duk_compiler_ctx *comp_ctx, duk_small_uint_t flags) {
 	duk_compiler_func *func = &comp_ctx->curr_func;
 	duk_hthread *thr = comp_ctx->thr;
 	duk_context *ctx = (duk_context *) thr;
@@ -658,6 +666,12 @@ DUK_LOCAL void duk__convert_to_func_template(duk_compiler_ctx *comp_ctx, duk_boo
 	duk_instr_t *p_instr;
 	duk_compiler_instr *q_instr;
 	duk_tval *tv;
+	duk_bool_t keep_varmap;
+	duk_bool_t keep_formals;
+#if !defined(DUK_USE_DEBUGGER_SUPPORT)
+	duk_size_t formals_length;
+#endif
+	duk_small_uint_t force_no_namebind;
 
 	DUK_DDD(DUK_DDDPRINT("converting duk_compiler_func to function/template"));
 
@@ -667,9 +681,10 @@ DUK_LOCAL void duk__convert_to_func_template(duk_compiler_ctx *comp_ctx, duk_boo
 
 	/* Valstack should suffice here, required on function valstack init */
 
-	(void) duk_push_compiledfunction(ctx);
-	h_res = (duk_hcompfunc *) DUK_GET_HOBJECT_NEGIDX(ctx, -1);  /* XXX: specific getter */
+	h_res = duk_push_hcompfunc(ctx);
 	DUK_ASSERT(h_res != NULL);
+	DUK_ASSERT(DUK_HOBJECT_GET_PROTOTYPE(thr->heap, (duk_hobject *) h_res) == thr->builtins[DUK_BIDX_FUNCTION_PROTOTYPE]);
+	DUK_HOBJECT_SET_PROTOTYPE_UPDREF(thr, (duk_hobject *) h_res, NULL);  /* Function templates are "bare objects". */
 
 	if (func->is_function) {
 		DUK_DDD(DUK_DDDPRINT("function -> set NEWENV"));
@@ -698,6 +713,8 @@ DUK_LOCAL void duk__convert_to_func_template(duk_compiler_ctx *comp_ctx, duk_boo
 		DUK_ASSERT(!DUK_HOBJECT_HAS_NEWENV((duk_hobject *) h_res));
 	}
 
+#if defined(DUK_USE_FUNC_NAME_PROPERTY)
+	force_no_namebind = (flags & DUK__FUNC_FLAG_GETSET);
 	if (func->is_function && !func->is_decl && func->h_name != NULL && !force_no_namebind) {
 		/* Object literal set/get functions have a name (property
 		 * name) but must not have a lexical name binding, see
@@ -706,6 +723,7 @@ DUK_LOCAL void duk__convert_to_func_template(duk_compiler_ctx *comp_ctx, duk_boo
 		DUK_DDD(DUK_DDDPRINT("function expression with a name -> set NAMEBINDING"));
 		DUK_HOBJECT_SET_NAMEBINDING((duk_hobject *) h_res);
 	}
+#endif
 
 	if (func->is_strict) {
 		DUK_DDD(DUK_DDDPRINT("function is strict -> set STRICT"));
@@ -715,6 +733,14 @@ DUK_LOCAL void duk__convert_to_func_template(duk_compiler_ctx *comp_ctx, duk_boo
 	if (func->is_notail) {
 		DUK_DDD(DUK_DDDPRINT("function is notail -> set NOTAIL"));
 		DUK_HOBJECT_SET_NOTAIL((duk_hobject *) h_res);
+	}
+
+	if (flags & DUK__FUNC_FLAG_GETSET) {
+		DUK_DDD(DUK_DDDPRINT("function is object literal getter/setter -> clear CONSTRUCTABLE"));
+		DUK_ASSERT(DUK_HOBJECT_HAS_CONSTRUCTABLE((duk_hobject *) h_res) == 0);
+	} else {
+		DUK_DDD(DUK_DDDPRINT("function is not object literal getter/setter -> set CONSTRUCTABLE"));
+		DUK_HOBJECT_SET_CONSTRUCTABLE((duk_hobject *) h_res);
 	}
 
 	/*
@@ -793,6 +819,25 @@ DUK_LOCAL void duk__convert_to_func_template(duk_compiler_ctx *comp_ctx, duk_boo
 	duk_pop(ctx);  /* 'data' (and everything in it) is reachable through h_res now */
 
 	/*
+	 *  Init non-property result fields
+	 *
+	 *  'nregs' controls how large a register frame is allocated.
+	 *
+	 *  'nargs' controls how many formal arguments are written to registers:
+	 *  r0, ... r(nargs-1).  The remaining registers are initialized to
+	 *  undefined.
+	 */
+
+	DUK_ASSERT(func->temp_max >= 0);
+	h_res->nregs = (duk_uint16_t) func->temp_max;
+	h_res->nargs = (duk_uint16_t) duk_hobject_get_length(thr, func->h_argnames);
+	DUK_ASSERT(h_res->nregs >= h_res->nargs);  /* pass2 allocation handles this */
+#if defined(DUK_USE_DEBUGGER_SUPPORT)
+	h_res->start_line = (duk_uint32_t) func->min_line;
+	h_res->end_line = (duk_uint32_t) func->max_line;
+#endif
+
+	/*
 	 *  Init object properties
 	 *
 	 *  Properties should be added in decreasing order of access frequency.
@@ -803,18 +848,30 @@ DUK_LOCAL void duk__convert_to_func_template(duk_compiler_ctx *comp_ctx, duk_boo
 
 	/* [ ... res ] */
 
-	/* _Varmap: omitted if function is guaranteed not to do slow path identifier
-	 * accesses or if it would turn out to be empty of actual register mappings
-	 * after a cleanup.  When debugging is enabled, we always need the varmap to
-	 * be able to lookup variables at any point.
+	/* _Varmap: omitted if function is guaranteed not to do a slow path
+	 * identifier access that might be caught by locally declared variables.
+	 * The varmap can also be omitted if it turns out empty of actual
+	 * register mappings after a cleanup.  When debugging is enabled, we
+	 * always need the varmap to be able to lookup variables at any point.
 	 */
+
 #if defined(DUK_USE_DEBUGGER_SUPPORT)
-	if (1) {
+	DUK_DD(DUK_DDPRINT("keeping _Varmap because debugger support is enabled"));
+	keep_varmap = 1;
 #else
-	if (func->id_access_slow ||     /* directly uses slow accesses */
-	    func->may_direct_eval ||    /* may indirectly slow access through a direct eval */
-	    funcs_count > 0) {          /* has inner functions which may slow access (XXX: this can be optimized by looking at the inner functions) */
+	if (func->id_access_slow_own ||   /* directly uses slow accesses that may match own variables */
+	    func->id_access_arguments ||  /* accesses 'arguments' directly */
+	    func->may_direct_eval ||      /* may indirectly slow access through a direct eval */
+	    funcs_count > 0) {            /* has inner functions which may slow access (XXX: this can be optimized by looking at the inner functions) */
+		DUK_DD(DUK_DDPRINT("keeping _Varmap because of direct eval, slow path access that may match local variables, or presence of inner functions"));
+		keep_varmap = 1;
+	} else {
+		DUK_DD(DUK_DDPRINT("dropping _Varmap"));
+		keep_varmap = 0;
+	}
 #endif
+
+	if (keep_varmap) {
 		duk_int_t num_used;
 		duk_dup(ctx, func->varmap_idx);
 		num_used = duk__cleanup_varmap(comp_ctx);
@@ -822,29 +879,58 @@ DUK_LOCAL void duk__convert_to_func_template(duk_compiler_ctx *comp_ctx, duk_boo
 		                     (duk_tval *) duk_get_tval(ctx, -1), (long) num_used));
 
 		if (num_used > 0) {
-			duk_xdef_prop_stridx(ctx, -2, DUK_STRIDX_INT_VARMAP, DUK_PROPDESC_FLAGS_NONE);
+			duk_xdef_prop_stridx_short(ctx, -2, DUK_STRIDX_INT_VARMAP, DUK_PROPDESC_FLAGS_NONE);
 		} else {
-			DUK_DDD(DUK_DDDPRINT("varmap is empty after cleanup -> no need to add"));
+			DUK_DD(DUK_DDPRINT("varmap is empty after cleanup -> no need to add"));
 			duk_pop(ctx);
 		}
 	}
 
-	/* _Formals: omitted if function is guaranteed not to need a (non-strict) arguments object */
-	if (1) {
-		/* XXX: Add a proper condition.  If formals list is omitted, recheck
-		 * handling for 'length' in duk_js_push_closure(); it currently relies
-		 * on _Formals being set.  Removal may need to be conditional to debugging
-		 * being enabled/disabled too.
+	/* _Formals: omitted if function is guaranteed not to need a (non-strict)
+	 * arguments object, and _Formals.length matches nargs exactly.
+	 *
+	 * Non-arrow functions can't see an outer function's 'argument' binding
+	 * (because they have their own), but arrow functions can.  When arrow
+	 * functions are added, this condition would need to be added:
+	 *     inner_arrow_funcs_count > 0   inner arrow functions may access 'arguments'
+	 */
+#if defined(DUK_USE_DEBUGGER_SUPPORT)
+	DUK_DD(DUK_DDPRINT("keeping _Formals because debugger support is enabled"));
+	keep_formals = 1;
+#else
+	formals_length = duk_get_length(ctx, func->argnames_idx);
+	if (formals_length != (duk_size_t) h_res->nargs) {
+		/* Nargs not enough for closure .length: keep _Formals regardless
+		 * of its length.  Shouldn't happen in practice at the moment.
 		 */
+		DUK_DD(DUK_DDPRINT("keeping _Formals because _Formals.length != nargs"));
+		keep_formals = 1;
+	} else if ((func->id_access_arguments || func->may_direct_eval) &&
+	           (formals_length > 0)) {
+		/* Direct eval (may access 'arguments') or accesses 'arguments'
+		 * explicitly: keep _Formals unless it is zero length.
+		 */
+		DUK_DD(DUK_DDPRINT("keeping _Formals because of direct eval or explicit access to 'arguments', and _Formals.length != 0"));
+		keep_formals = 1;
+	} else {
+		DUK_DD(DUK_DDPRINT("omitting _Formals, nargs matches _Formals.length, so no properties added"));
+		keep_formals = 0;
+	}
+#endif
+
+	if (keep_formals) {
 		duk_dup(ctx, func->argnames_idx);
-		duk_xdef_prop_stridx(ctx, -2, DUK_STRIDX_INT_FORMALS, DUK_PROPDESC_FLAGS_NONE);
+		duk_xdef_prop_stridx_short(ctx, -2, DUK_STRIDX_INT_FORMALS, DUK_PROPDESC_FLAGS_NONE);
 	}
 
 	/* name */
+#if defined(DUK_USE_FUNC_NAME_PROPERTY)
 	if (func->h_name) {
 		duk_push_hstring(ctx, func->h_name);
-		duk_xdef_prop_stridx(ctx, -2, DUK_STRIDX_NAME, DUK_PROPDESC_FLAGS_NONE);
+		DUK_DD(DUK_DDPRINT("setting function template .name to %!T", duk_get_tval(ctx, -1)));
+		duk_xdef_prop_stridx_short(ctx, -2, DUK_STRIDX_NAME, DUK_PROPDESC_FLAGS_NONE);
 	}
+#endif  /* DUK_USE_FUNC_NAME_PROPERTY */
 
 	/* _Source */
 #if defined(DUK_USE_NONSTD_FUNC_SOURCE_PROPERTY)
@@ -889,7 +975,7 @@ DUK_LOCAL void duk__convert_to_func_template(duk_compiler_ctx *comp_ctx, duk_boo
 
 #if 0
 		duk_push_string(ctx, "XXX");
-		duk_xdef_prop_stridx(ctx, -2, DUK_STRIDX_INT_SOURCE, DUK_PROPDESC_FLAGS_NONE);
+		duk_xdef_prop_stridx_short(ctx, -2, DUK_STRIDX_INT_SOURCE, DUK_PROPDESC_FLAGS_NONE);
 #endif
 	}
 #endif  /* DUK_USE_NONSTD_FUNC_SOURCE_PROPERTY */
@@ -903,7 +989,7 @@ DUK_LOCAL void duk__convert_to_func_template(duk_compiler_ctx *comp_ctx, duk_boo
 
 		DUK_ASSERT(code_count <= DUK_COMPILER_MAX_BYTECODE_LENGTH);
 		duk_hobject_pc2line_pack(thr, q_instr, (duk_uint_fast32_t) code_count);  /* -> pushes fixed buffer */
-		duk_xdef_prop_stridx(ctx, -2, DUK_STRIDX_INT_PC2LINE, DUK_PROPDESC_FLAGS_NONE);
+		duk_xdef_prop_stridx_short(ctx, -2, DUK_STRIDX_INT_PC2LINE, DUK_PROPDESC_FLAGS_NONE);
 
 		/* XXX: if assertions enabled, walk through all valid PCs
 		 * and check line mapping.
@@ -912,32 +998,15 @@ DUK_LOCAL void duk__convert_to_func_template(duk_compiler_ctx *comp_ctx, duk_boo
 #endif  /* DUK_USE_PC2LINE */
 
 	/* fileName */
+#if defined(DUK_USE_FUNC_FILENAME_PROPERTY)
 	if (comp_ctx->h_filename) {
 		/*
 		 *  Source filename (or equivalent), for identifying thrown errors.
 		 */
 
 		duk_push_hstring(ctx, comp_ctx->h_filename);
-		duk_xdef_prop_stridx(ctx, -2, DUK_STRIDX_FILE_NAME, DUK_PROPDESC_FLAGS_NONE);
+		duk_xdef_prop_stridx_short(ctx, -2, DUK_STRIDX_FILE_NAME, DUK_PROPDESC_FLAGS_NONE);
 	}
-
-	/*
-	 *  Init remaining result fields
-	 *
-	 *  'nregs' controls how large a register frame is allocated.
-	 *
-	 *  'nargs' controls how many formal arguments are written to registers:
-	 *  r0, ... r(nargs-1).  The remaining registers are initialized to
-	 *  undefined.
-	 */
-
-	DUK_ASSERT(func->temp_max >= 0);
-	h_res->nregs = (duk_uint16_t) func->temp_max;
-	h_res->nargs = (duk_uint16_t) duk_hobject_get_length(thr, func->h_argnames);
-	DUK_ASSERT(h_res->nregs >= h_res->nargs);  /* pass2 allocation handles this */
-#if defined(DUK_USE_DEBUGGER_SUPPORT)
-	h_res->start_line = (duk_uint32_t) func->min_line;
-	h_res->end_line = (duk_uint32_t) func->max_line;
 #endif
 
 	DUK_DD(DUK_DDPRINT("converted function: %!ixT",
@@ -947,7 +1016,7 @@ DUK_LOCAL void duk__convert_to_func_template(duk_compiler_ctx *comp_ctx, duk_boo
 	 *  Compact the function template.
 	 */
 
-	duk_compact(ctx, -1);
+	duk_compact_m1(ctx);
 
 	/*
 	 *  Debug dumping
@@ -1861,7 +1930,7 @@ DUK_LOCAL duk_regconst_t duk__getconst(duk_compiler_ctx *comp_ctx) {
 
 #if defined(DUK_USE_FASTINT)
 	/* Explicit check for fastint downgrade. */
-	DUK_TVAL_CHKFAST_INPLACE(tv1);
+	DUK_TVAL_CHKFAST_INPLACE_SLOW(tv1);
 #endif
 
 	/* Sanity workaround for handling functions with a large number of
@@ -2151,7 +2220,7 @@ DUK_LOCAL void duk__ivalue_toplain_raw(duk_compiler_ctx *comp_ctx, duk_ivalue *x
 				duk_double_t d1 = DUK_TVAL_GET_NUMBER(tv1);
 				duk_double_t d2 = DUK_TVAL_GET_NUMBER(tv2);
 				duk_double_t d3;
-				duk_bool_t accept = 1;
+				duk_bool_t accept_fold = 1;
 
 				DUK_DDD(DUK_DDDPRINT("arith inline check: d1=%lf, d2=%lf, op=%ld",
 				                     (double) d1, (double) d2, (long) x->op));
@@ -2164,10 +2233,10 @@ DUK_LOCAL void duk__ivalue_toplain_raw(duk_compiler_ctx *comp_ctx, duk_ivalue *x
 					d3 = (duk_double_t) duk_js_arith_pow((double) d1, (double) d2);
 					break;
 				}
-				default: accept = 0; break;
+				default: accept_fold = 0; break;
 				}
 
-				if (accept) {
+				if (accept_fold) {
 					duk_double_union du;
 					du.d = d3;
 					DUK_DBLUNION_NORMALIZE_NAN_CHECK(&du);
@@ -2408,7 +2477,7 @@ DUK_LOCAL duk_reg_t duk__lookup_active_register_binding(duk_compiler_ctx *comp_c
 
 	if (comp_ctx->curr_func.with_depth > 0) {
 		DUK_DDD(DUK_DDDPRINT("identifier lookup inside a 'with' -> fall back to slow path"));
-		goto slow_path;
+		goto slow_path_own;
 	}
 
 	/*
@@ -2425,16 +2494,33 @@ DUK_LOCAL duk_reg_t duk__lookup_active_register_binding(duk_compiler_ctx *comp_c
 		duk_pop(ctx);
 	} else {
 		duk_pop(ctx);
-		goto slow_path;
+		if (comp_ctx->curr_func.catch_depth > 0 || comp_ctx->curr_func.with_depth > 0) {
+			DUK_DDD(DUK_DDDPRINT("slow path access from inside a try-catch or with needs _Varmap"));
+			goto slow_path_own;
+		} else {
+			/* In this case we're doing a variable lookup that doesn't
+			 * match our own variables, so _Varmap won't be needed at
+			 * run time.
+			 */
+			DUK_DDD(DUK_DDDPRINT("slow path access outside of try-catch and with, no need for _Varmap"));
+			goto slow_path_notown;
+		}
 	}
 
 	DUK_DDD(DUK_DDDPRINT("identifier lookup -> reg %ld", (long) ret));
 	return ret;
 
- slow_path:
-	DUK_DDD(DUK_DDDPRINT("identifier lookup -> slow path"));
+ slow_path_notown:
+	DUK_DDD(DUK_DDDPRINT("identifier lookup -> slow path, not own variable"));
 
 	comp_ctx->curr_func.id_access_slow = 1;
+	return (duk_reg_t) -1;
+
+ slow_path_own:
+	DUK_DDD(DUK_DDDPRINT("identifier lookup -> slow path, may be own variable"));
+
+	comp_ctx->curr_func.id_access_slow = 1;
+	comp_ctx->curr_func.id_access_slow_own = 1;
 	return (duk_reg_t) -1;
 }
 
@@ -3034,7 +3120,7 @@ DUK_LOCAL void duk__nud_object_literal(duk_compiler_ctx *comp_ctx, duk_ivalue *r
 				}
 
 				/* curr_token = get/set name */
-				fnum = duk__parse_func_like_fnum(comp_ctx, 0 /*is_decl*/, 1 /*is_setget*/);
+				fnum = duk__parse_func_like_fnum(comp_ctx, DUK__FUNC_FLAG_GETSET);
 
 				DUK_ASSERT(DUK__GETTEMP(comp_ctx) == temp_start);
 				reg_temp = DUK__ALLOCTEMP(comp_ctx);
@@ -3265,7 +3351,7 @@ DUK_LOCAL void duk__expr_nud(duk_compiler_ctx *comp_ctx, duk_ivalue *res) {
 		goto plain_value;
 	}
 	case DUK_TOK_REGEXP: {
-#ifdef DUK_USE_REGEXP_SUPPORT
+#if defined(DUK_USE_REGEXP_SUPPORT)
 		duk_reg_t reg_temp;
 		duk_regconst_t rc_re_bytecode;  /* const */
 		duk_regconst_t rc_re_source;    /* const */
@@ -3403,7 +3489,7 @@ DUK_LOCAL void duk__expr_nud(duk_compiler_ctx *comp_ctx, duk_ivalue *res) {
 		reg_temp = DUK__ALLOCTEMP(comp_ctx);
 
 		/* curr_token follows 'function' */
-		fnum = duk__parse_func_like_fnum(comp_ctx, 0 /*is_decl*/, 0 /*is_setget*/);
+		fnum = duk__parse_func_like_fnum(comp_ctx, 0 /*flags*/);
 		DUK_DDD(DUK_DDDPRINT("parsed inner function -> fnum %ld", (long) fnum));
 
 		duk__emit_a_bc(comp_ctx,
@@ -6248,29 +6334,40 @@ DUK_LOCAL void duk__parse_stmt(duk_compiler_ctx *comp_ctx, duk_ivalue *res, duk_
 			 */
 
 			duk_int_t fnum;
+#if defined(DUK_USE_ASSERTIONS)
+			duk_idx_t top_before;
+#endif
 
 			DUK_DDD(DUK_DDDPRINT("function declaration statement"));
 
-			duk__advance(comp_ctx);  /* eat 'function' */
-			fnum = duk__parse_func_like_fnum(comp_ctx, 1 /*is_decl*/, 0 /*is_setget*/);
+#if defined(DUK_USE_ASSERTIONS)
+			top_before = duk_get_top(ctx);
+#endif
 
+			duk__advance(comp_ctx);  /* eat 'function' */
+			fnum = duk__parse_func_like_fnum(comp_ctx, DUK__FUNC_FLAG_DECL | DUK__FUNC_FLAG_PUSHNAME_PASS1);
+
+			/* The value stack convention here is a bit odd: the function
+			 * name is only pushed on pass 1 (in_scanning), and is needed
+			 * to process function declarations.
+			 */
 			if (comp_ctx->curr_func.in_scanning) {
 				duk_uarridx_t n;
-				duk_hstring *h_funcname;
 
-				duk_get_prop_index(ctx, comp_ctx->curr_func.funcs_idx, fnum * 3);
-				duk_get_prop_stridx(ctx, -1, DUK_STRIDX_NAME);  /* -> [ ... func name ] */
-				h_funcname = duk_known_hstring(ctx, -1);
-
-				DUK_DDD(DUK_DDDPRINT("register function declaration %!O in pass 1, fnum %ld",
-				                     (duk_heaphdr *) h_funcname, (long) fnum));
+#if defined(DUK_USE_ASSERTIONS)
+				DUK_ASSERT(duk_get_top(ctx) == top_before + 1);
+#endif
+				DUK_DDD(DUK_DDDPRINT("register function declaration %!T in pass 1, fnum %ld",
+				                     duk_get_tval(ctx, -1), (long) fnum));
 				n = (duk_uarridx_t) duk_get_length(ctx, comp_ctx->curr_func.decls_idx);
-				duk_push_hstring(ctx, h_funcname);
+				/* funcname is at index -1 */
 				duk_put_prop_index(ctx, comp_ctx->curr_func.decls_idx, n);
 				duk_push_int(ctx, (duk_int_t) (DUK_DECL_TYPE_FUNC + (fnum << 8)));
 				duk_put_prop_index(ctx, comp_ctx->curr_func.decls_idx, n + 1);
-
-				duk_pop_n(ctx, 2);
+			} else {
+#if defined(DUK_USE_ASSERTIONS)
+				DUK_ASSERT(duk_get_top(ctx) == top_before);
+#endif
 			}
 
 			/* no statement value (unlike function expression) */
@@ -6761,11 +6858,11 @@ DUK_LOCAL void duk__init_varmap_and_prologue_for_pass2(duk_compiler_ctx *comp_ct
 	duk_regconst_t rc_name;
 	duk_small_uint_t declvar_flags;
 	duk_uarridx_t i;
-#ifdef DUK_USE_ASSERTIONS
+#if defined(DUK_USE_ASSERTIONS)
 	duk_idx_t entry_top;
 #endif
 
-#ifdef DUK_USE_ASSERTIONS
+#if defined(DUK_USE_ASSERTIONS)
 	entry_top = duk_get_top(ctx);
 #endif
 
@@ -7144,6 +7241,7 @@ DUK_LOCAL void duk__parse_func_body(duk_compiler_ctx *comp_ctx, duk_bool_t expec
 	func->may_direct_eval = 0;
 	func->id_access_arguments = 0;
 	func->id_access_slow = 0;
+	func->id_access_slow_own = 0;
 	func->reg_stmt_value = reg_stmt_value;
 #if defined(DUK_USE_DEBUGGER_SUPPORT)
 	func->min_line = DUK_INT_MAX;
@@ -7233,6 +7331,7 @@ DUK_LOCAL void duk__parse_func_body(duk_compiler_ctx *comp_ctx, duk_bool_t expec
 		/* XXX: init or assert catch depth etc -- all values */
 		func->id_access_arguments = 0;
 		func->id_access_slow = 0;
+		func->id_access_slow_own = 0;
 
 		/*
 		 *  Check function name validity now that we know strictness.
@@ -7399,7 +7498,7 @@ DUK_LOCAL void duk__parse_func_formals(duk_compiler_ctx *comp_ctx) {
  * correctly set up.  Assumes that curr_token is just after 'function' (or
  * 'set'/'get' etc).
  */
-DUK_LOCAL void duk__parse_func_like_raw(duk_compiler_ctx *comp_ctx, duk_bool_t is_decl, duk_bool_t is_setget) {
+DUK_LOCAL void duk__parse_func_like_raw(duk_compiler_ctx *comp_ctx, duk_small_uint_t flags) {
 	duk_hthread *thr = comp_ctx->thr;
 	duk_context *ctx = (duk_context *) thr;
 
@@ -7407,8 +7506,8 @@ DUK_LOCAL void duk__parse_func_like_raw(duk_compiler_ctx *comp_ctx, duk_bool_t i
 	DUK_ASSERT(comp_ctx->curr_func.is_function == 1);
 	DUK_ASSERT(comp_ctx->curr_func.is_eval == 0);
 	DUK_ASSERT(comp_ctx->curr_func.is_global == 0);
-	DUK_ASSERT(comp_ctx->curr_func.is_setget == is_setget);
-	DUK_ASSERT(comp_ctx->curr_func.is_decl == is_decl);
+	DUK_ASSERT(comp_ctx->curr_func.is_setget == ((flags & DUK__FUNC_FLAG_GETSET) != 0));
+	DUK_ASSERT(comp_ctx->curr_func.is_decl == ((flags & DUK__FUNC_FLAG_DECL) != 0));
 
 	duk__update_lineinfo_currtoken(comp_ctx);
 
@@ -7425,7 +7524,7 @@ DUK_LOCAL void duk__parse_func_like_raw(duk_compiler_ctx *comp_ctx, duk_bool_t i
 	 *  strings and numbers (e.g. "{ get 1() { ... } }").
 	 */
 
-	if (is_setget) {
+	if (flags & DUK__FUNC_FLAG_GETSET) {
 		/* PropertyName -> IdentifierName | StringLiteral | NumericLiteral */
 		if (comp_ctx->curr_token.t_nores == DUK_TOK_IDENTIFIER ||
 		    comp_ctx->curr_token.t == DUK_TOK_STRING) {
@@ -7449,15 +7548,16 @@ DUK_LOCAL void duk__parse_func_like_raw(duk_compiler_ctx *comp_ctx, duk_bool_t i
 			duk__advance(comp_ctx);
 		} else {
 			/* valstack will be unbalanced, which is OK */
-			DUK_ASSERT(!is_setget);
-			if (is_decl) {
+			DUK_ASSERT((flags & DUK__FUNC_FLAG_GETSET) == 0);
+			DUK_ASSERT(comp_ctx->curr_func.h_name == NULL);
+			if (flags & DUK__FUNC_FLAG_DECL) {
 				DUK_ERROR_SYNTAX(thr, DUK_STR_FUNC_NAME_REQUIRED);
 			}
 		}
 	}
 
-	DUK_DDD(DUK_DDDPRINT("function name: %!O",
-	                     (duk_heaphdr *) comp_ctx->curr_func.h_name));
+	DUK_DD(DUK_DDPRINT("function name: %!O",
+	                   (duk_heaphdr *) comp_ctx->curr_func.h_name));
 
 	/*
 	 *  Formal argument list
@@ -7488,7 +7588,7 @@ DUK_LOCAL void duk__parse_func_like_raw(duk_compiler_ctx *comp_ctx, duk_bool_t i
 	 *  to the parent function table.
 	 */
 
-	duk__convert_to_func_template(comp_ctx, is_setget /*force_no_namebind*/);  /* -> [ ... func ] */
+	duk__convert_to_func_template(comp_ctx, flags);  /* -> [ ... func funcname? ] */
 }
 
 /* Parse an inner function, adding the function template to the current function's
@@ -7505,7 +7605,7 @@ DUK_LOCAL void duk__parse_func_like_raw(duk_compiler_ctx *comp_ctx, duk_bool_t i
  * need that information at the moment, but it would allow some optimizations if it
  * were used.
  */
-DUK_LOCAL duk_int_t duk__parse_func_like_fnum(duk_compiler_ctx *comp_ctx, duk_bool_t is_decl, duk_bool_t is_setget) {
+DUK_LOCAL duk_int_t duk__parse_func_like_fnum(duk_compiler_ctx *comp_ctx, duk_small_uint_t flags) {
 	duk_hthread *thr = comp_ctx->thr;
 	duk_context *ctx = (duk_context *) thr;
 	duk_compiler_func old_func;
@@ -7561,14 +7661,14 @@ DUK_LOCAL duk_int_t duk__parse_func_like_fnum(duk_compiler_ctx *comp_ctx, duk_bo
 	comp_ctx->curr_func.is_function = 1;
 	DUK_ASSERT(comp_ctx->curr_func.is_eval == 0);
 	DUK_ASSERT(comp_ctx->curr_func.is_global == 0);
-	comp_ctx->curr_func.is_setget = is_setget;
-	comp_ctx->curr_func.is_decl = is_decl;
+	comp_ctx->curr_func.is_setget = (flags & DUK__FUNC_FLAG_GETSET) ? 1 : 0;
+	comp_ctx->curr_func.is_decl = (flags & DUK__FUNC_FLAG_DECL) ? 1 : 0;
 
 	/*
 	 *  Parse inner function
 	 */
 
-	duk__parse_func_like_raw(comp_ctx, is_decl, is_setget);  /* pushes function template */
+	duk__parse_func_like_raw(comp_ctx, flags);  /* pushes function template */
 
 	/* prev_token.start_offset points to the closing brace here; when skipping
 	 * we're going to reparse the closing brace to ensure semicolon insertion
@@ -7595,12 +7695,20 @@ DUK_LOCAL duk_int_t duk__parse_func_like_fnum(duk_compiler_ctx *comp_ctx, duk_bo
 
 	/*
 	 *  Cleanup: restore original function, restore valstack state.
+	 *
+	 *  Function declaration handling needs the function name to be pushed
+	 *  on the value stack.
 	 */
 
+	if (flags & DUK__FUNC_FLAG_PUSHNAME_PASS1) {
+		DUK_ASSERT(comp_ctx->curr_func.h_name != NULL);
+		duk_push_hstring(ctx, comp_ctx->curr_func.h_name);
+		duk_replace(ctx, entry_top);
+		duk_set_top(ctx, entry_top + 1);
+	} else {
+		duk_set_top(ctx, entry_top);
+	}
 	DUK_MEMCPY((void *) &comp_ctx->curr_func, (void *) &old_func, sizeof(duk_compiler_func));
-	duk_set_top(ctx, entry_top);
-
-	DUK_ASSERT_TOP(ctx, entry_top);
 
 	return fnum;
 }
@@ -7660,7 +7768,7 @@ DUK_LOCAL duk_ret_t duk__js_compile_raw(duk_context *ctx, void *udata) {
 	 */
 
 	func = &comp_ctx->curr_func;
-#ifdef DUK_USE_EXPLICIT_NULL_INIT
+#if defined(DUK_USE_EXPLICIT_NULL_INIT)
 	comp_ctx->thr = NULL;
 	comp_ctx->h_filename = NULL;
 	comp_ctx->prev_token.str1 = NULL;
@@ -7737,9 +7845,7 @@ DUK_LOCAL duk_ret_t duk__js_compile_raw(duk_context *ctx, void *udata) {
 
 		duk__advance(comp_ctx);  /* init 'curr_token' */
 		duk__advance_expect(comp_ctx, DUK_TOK_FUNCTION);
-		(void) duk__parse_func_like_raw(comp_ctx,
-		                                0,      /* is_decl */
-		                                0);     /* is_setget */
+		(void) duk__parse_func_like_raw(comp_ctx, 0 /*flags*/);
 	} else {
 		func->is_function = 0;
 		func->is_eval = is_eval;
@@ -7755,7 +7861,7 @@ DUK_LOCAL duk_ret_t duk__js_compile_raw(duk_context *ctx, void *udata) {
 	 *  Convert duk_compiler_func to a function template
 	 */
 
-	duk__convert_to_func_template(comp_ctx, 0 /*force_no_namebind*/);
+	duk__convert_to_func_template(comp_ctx, 0 /*flags*/);
 
 	/*
 	 *  Wrapping duk_safe_call() will mangle the stack, just return stack top

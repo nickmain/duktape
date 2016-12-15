@@ -69,6 +69,11 @@ DUK_INTERNAL duk_ret_t duk_bi_function_constructor(duk_context *ctx) {
 	               (const duk_uint8_t *) DUK_HSTRING_GET_DATA(h_sourcecode),
 	               (duk_size_t) DUK_HSTRING_GET_BYTELEN(h_sourcecode),
 	               comp_flags);
+
+	/* Force .name to 'anonymous' (ES6). */
+	duk_push_string(ctx, "anonymous");
+	duk_xdef_prop_stridx_short(ctx, -2, DUK_STRIDX_NAME, DUK_PROPDESC_FLAGS_C);
+
 	func = (duk_hcompfunc *) duk_known_hobject(ctx, -1);
 	DUK_ASSERT(DUK_HOBJECT_IS_COMPFUNC((duk_hobject *) func));
 
@@ -95,24 +100,26 @@ DUK_INTERNAL duk_ret_t duk_bi_function_prototype_to_string(duk_context *ctx) {
 
 	/*
 	 *  E5 Section 15.3.4.2 places few requirements on the output of
-	 *  this function:
+	 *  this function: the result is implementation dependent, must
+	 *  follow FunctionDeclaration syntax (in particular, must have a
+	 *  name even for anonymous functions or functions with empty name).
+	 *  The output does NOT need to compile into anything useful.
 	 *
-	 *    - The result is an implementation dependent representation
-	 *      of the function; in particular
+	 *  E6 Section 19.2.3.5 changes the requirements completely: the
+	 *  result must either eval() to a functionally equivalent object
+	 *  OR eval() to a SyntaxError.
 	 *
-	 *    - The result must follow the syntax of a FunctionDeclaration.
-	 *      In particular, the function must have a name (even in the
-	 *      case of an anonymous function or a function with an empty
-	 *      name).
+	 *  We opt for the SyntaxError approach for now, with a syntax that
+	 *  mimics V8's native function syntax:
 	 *
-	 *    - Note in particular that the output does NOT need to compile
-	 *      into anything useful.
+	 *      'function cos() { [native code] }'
+	 *
+	 *  but extended with [ecmascript code], [bound code], and
+	 *  [lightfunc code].
 	 */
 
-
-	/* XXX: faster internal way to get this */
 	duk_push_this(ctx);
-	tv = duk_get_tval(ctx, -1);
+	tv = DUK_GET_TVAL_NEGIDX(ctx, -1);
 	DUK_ASSERT(tv != NULL);
 
 	if (DUK_TVAL_IS_OBJECT(tv)) {
@@ -120,12 +127,13 @@ DUK_INTERNAL duk_ret_t duk_bi_function_prototype_to_string(duk_context *ctx) {
 		const char *func_name;
 
 		/* Function name: missing/undefined is mapped to empty string,
-		 * otherwise coerce to string.
+		 * otherwise coerce to string.  No handling for invalid identifier
+		 * characters or e.g. '{' in the function name.  This doesn't
+		 * really matter as long as a SyntaxError results.  Technically
+		 * if the name contained a suitable prefix followed by '//' it
+		 * might cause the result to parse without error.
 		 */
-		/* XXX: currently no handling for non-allowed identifier characters,
-		 * e.g. a '{' in the function name.
-		 */
-		duk_get_prop_stridx(ctx, -1, DUK_STRIDX_NAME);
+		duk_get_prop_stridx_short(ctx, -1, DUK_STRIDX_NAME);
 		if (duk_is_undefined(ctx, -1)) {
 			func_name = "";
 		} else {
@@ -133,15 +141,12 @@ DUK_INTERNAL duk_ret_t duk_bi_function_prototype_to_string(duk_context *ctx) {
 			DUK_ASSERT(func_name != NULL);
 		}
 
-		/* Indicate function type in the function body using a dummy
-		 * directive.
-		 */
 		if (DUK_HOBJECT_IS_COMPFUNC(obj)) {
-			duk_push_sprintf(ctx, "function %s() {\"ecmascript\"}", (const char *) func_name);
+			duk_push_sprintf(ctx, "function %s() { [ecmascript code] }", (const char *) func_name);
 		} else if (DUK_HOBJECT_IS_NATFUNC(obj)) {
-			duk_push_sprintf(ctx, "function %s() {\"native\"}", (const char *) func_name);
+			duk_push_sprintf(ctx, "function %s() { [native code] }", (const char *) func_name);
 		} else if (DUK_HOBJECT_IS_BOUNDFUNC(obj)) {
-			duk_push_sprintf(ctx, "function %s() {\"bound\"}", (const char *) func_name);
+			duk_push_sprintf(ctx, "function %s() { [bound code] }", (const char *) func_name);
 		} else {
 			goto type_error;
 		}
@@ -222,6 +227,7 @@ DUK_INTERNAL duk_ret_t duk_bi_function_prototype_apply(duk_context *ctx) {
 		DUK_DDD(DUK_DDDPRINT("argArray is an object"));
 
 		/* XXX: make this an internal helper */
+		DUK_ASSERT(idx_args >= 0 && idx_args <= 0x7fffL);  /* short variants would work, but avoid shifting */
 		duk_get_prop_stridx(ctx, idx_args, DUK_STRIDX_LENGTH);
 		len = (duk_idx_t) duk_to_uint32(ctx, -1);  /* ToUint32() coercion required */
 		duk_pop(ctx);
@@ -302,6 +308,7 @@ DUK_INTERNAL duk_ret_t duk_bi_function_prototype_call(duk_context *ctx) {
  * merges argument lists etc here.
  */
 DUK_INTERNAL duk_ret_t duk_bi_function_prototype_bind(duk_context *ctx) {
+	duk_hthread *thr = (duk_hthread *) ctx;
 	duk_hobject *h_bound;
 	duk_hobject *h_target;
 	duk_idx_t nargs;
@@ -322,20 +329,20 @@ DUK_INTERNAL duk_ret_t duk_bi_function_prototype_bind(duk_context *ctx) {
 	DUK_ASSERT_TOP(ctx, nargs + 1);
 
 	/* create bound function object */
-	duk_push_object_helper(ctx,
-	                       DUK_HOBJECT_FLAG_EXTENSIBLE |
-	                       DUK_HOBJECT_FLAG_BOUNDFUNC |
-	                       DUK_HOBJECT_FLAG_CONSTRUCTABLE |
-	                       DUK_HOBJECT_CLASS_AS_FLAGS(DUK_HOBJECT_CLASS_FUNCTION),
-	                       DUK_BIDX_FUNCTION_PROTOTYPE);
-	h_bound = duk_known_hobject(ctx, -1);
+	h_bound = duk_push_object_helper(ctx,
+	                                 DUK_HOBJECT_FLAG_EXTENSIBLE |
+	                                 DUK_HOBJECT_FLAG_BOUNDFUNC |
+	                                 DUK_HOBJECT_FLAG_CONSTRUCTABLE |
+	                                 DUK_HOBJECT_CLASS_AS_FLAGS(DUK_HOBJECT_CLASS_FUNCTION),
+	                                 DUK_BIDX_FUNCTION_PROTOTYPE);
+	DUK_ASSERT(h_bound != NULL);
 
 	/* [ thisArg arg1 ... argN func boundFunc ] */
 	duk_dup_m2(ctx);  /* func */
-	duk_xdef_prop_stridx(ctx, -2, DUK_STRIDX_INT_TARGET, DUK_PROPDESC_FLAGS_NONE);
+	duk_xdef_prop_stridx_short(ctx, -2, DUK_STRIDX_INT_TARGET, DUK_PROPDESC_FLAGS_NONE);
 
 	duk_dup_0(ctx);   /* thisArg */
-	duk_xdef_prop_stridx(ctx, -2, DUK_STRIDX_INT_THIS, DUK_PROPDESC_FLAGS_NONE);
+	duk_xdef_prop_stridx_short(ctx, -2, DUK_STRIDX_INT_THIS, DUK_PROPDESC_FLAGS_NONE);
 
 	duk_push_array(ctx);
 
@@ -345,35 +352,55 @@ DUK_INTERNAL duk_ret_t duk_bi_function_prototype_bind(duk_context *ctx) {
 		duk_dup(ctx, 1 + i);
 		duk_put_prop_index(ctx, -2, i);
 	}
-	duk_xdef_prop_stridx(ctx, -2, DUK_STRIDX_INT_ARGS, DUK_PROPDESC_FLAGS_NONE);
+	duk_xdef_prop_stridx_short(ctx, -2, DUK_STRIDX_INT_ARGS, DUK_PROPDESC_FLAGS_NONE);
 
 	/* [ thisArg arg1 ... argN func boundFunc ] */
 
-	/* bound function 'length' property is interesting */
 	h_target = duk_get_hobject(ctx, -2);
+
+	/* internal prototype must be copied from the target */
+	if (h_target != NULL) {
+		/* For lightfuncs Function.prototype is used and is already in place. */
+		DUK_HOBJECT_SET_PROTOTYPE_UPDREF(thr, h_bound, DUK_HOBJECT_GET_PROTOTYPE(thr->heap, h_target));
+	}
+
+	/* bound function 'length' property is interesting */
 	if (h_target == NULL ||  /* lightfunc */
 	    DUK_HOBJECT_GET_CLASS_NUMBER(h_target) == DUK_HOBJECT_CLASS_FUNCTION) {
 		/* For lightfuncs, simply read the virtual property. */
 		duk_int_t tmp;
-		duk_get_prop_stridx(ctx, -2, DUK_STRIDX_LENGTH);
+		duk_get_prop_stridx_short(ctx, -2, DUK_STRIDX_LENGTH);
 		tmp = duk_to_int(ctx, -1) - (nargs - 1);  /* step 15.a */
 		duk_pop(ctx);
 		duk_push_int(ctx, (tmp < 0 ? 0 : tmp));
 	} else {
 		duk_push_int(ctx, 0);
 	}
-	duk_xdef_prop_stridx(ctx, -2, DUK_STRIDX_LENGTH, DUK_PROPDESC_FLAGS_NONE);  /* attrs in E5 Section 15.3.5.1 */
+	duk_xdef_prop_stridx_short(ctx, -2, DUK_STRIDX_LENGTH, DUK_PROPDESC_FLAGS_C);  /* attrs in E6 Section 9.2.4 */
 
 	/* caller and arguments must use the same thrower, [[ThrowTypeError]] */
 	duk_xdef_prop_stridx_thrower(ctx, -1, DUK_STRIDX_CALLER);
 	duk_xdef_prop_stridx_thrower(ctx, -1, DUK_STRIDX_LC_ARGUMENTS);
 
-	/* these non-standard properties are copied for convenience */
 	/* XXX: 'copy properties' API call? */
-	duk_get_prop_stridx(ctx, -2, DUK_STRIDX_NAME);
-	duk_xdef_prop_stridx(ctx, -2, DUK_STRIDX_NAME, DUK_PROPDESC_FLAGS_WC);
-	duk_get_prop_stridx(ctx, -2, DUK_STRIDX_FILE_NAME);
-	duk_xdef_prop_stridx(ctx, -2, DUK_STRIDX_FILE_NAME, DUK_PROPDESC_FLAGS_WC);
+#if defined(DUK_USE_FUNC_NAME_PROPERTY)
+	duk_push_string(ctx, "bound ");  /* ES6 19.2.3.2. */
+	duk_get_prop_stridx_short(ctx, -3, DUK_STRIDX_NAME);
+	if (!duk_is_string(ctx, -1)) {
+		/* ES6 has requirement to check that .name of target is a string
+		 * (also must check for Symbol); if not, targetName should be the
+		 * empty string.  ES6 19.2.3.2.
+		 */
+		duk_pop(ctx);
+		duk_push_hstring_empty(ctx);
+	}
+	duk_concat(ctx, 2);
+	duk_xdef_prop_stridx_short(ctx, -2, DUK_STRIDX_NAME, DUK_PROPDESC_FLAGS_C);
+#endif
+#if defined(DUK_USE_FUNC_FILENAME_PROPERTY)
+	duk_get_prop_stridx_short(ctx, -2, DUK_STRIDX_FILE_NAME);
+	duk_xdef_prop_stridx_short(ctx, -2, DUK_STRIDX_FILE_NAME, DUK_PROPDESC_FLAGS_C);
+#endif
 
 	/* The 'strict' flag is copied to get the special [[Get]] of E5.1
 	 * Section 15.3.5.4 to apply when a 'caller' value is a strict bound

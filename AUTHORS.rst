@@ -39,6 +39,8 @@ and agreed to irrevocably license their contributions under the Duktape
 * Oliver Crow (https://github.com/ocrow)
 * Jakub Chłapiński (https://github.com/jchlapinski)
 * Brett Vickers (https://github.com/beevik)
+* Dominik Okwieka (https://github.com/okitec)
+* Remko Tronçon (https://el-tramo.be)
 
 Other contributions
 ===================

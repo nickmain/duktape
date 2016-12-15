@@ -3,7 +3,7 @@
  *  Access all fields through the accessor macros.
  */
 
-#ifndef DUK_HEAPHDR_H_INCLUDED
+#if !defined(DUK_HEAPHDR_H_INCLUDED)
 #define DUK_HEAPHDR_H_INCLUDED
 
 /*
@@ -152,7 +152,7 @@ struct duk_heaphdr_string {
 #define DUK_HEAPHDR_PREDEC_REFCOUNT(h)  (--(h)->h_refcount)  /* result: updated refcount */
 #endif
 #else
-/* refcount macros not defined without refcounting, caller must #ifdef now */
+/* refcount macros not defined without refcounting, caller must #if defined() now */
 #endif  /* DUK_USE_REFERENCE_COUNTING */
 
 /*
@@ -161,12 +161,13 @@ struct duk_heaphdr_string {
  */
 
 #define DUK_HEAPHDR_GET_FLAGS_RAW(h)  ((h)->h_flags)
-
+#define DUK_HEAPHDR_SET_FLAGS_RAW(h,val)  do { \
+		(h)->h_flags = (val); } \
+	}
 #define DUK_HEAPHDR_GET_FLAGS(h)      ((h)->h_flags & DUK_HEAPHDR_FLAGS_FLAG_MASK)
 #define DUK_HEAPHDR_SET_FLAGS(h,val)  do { \
 		(h)->h_flags = ((h)->h_flags & ~(DUK_HEAPHDR_FLAGS_FLAG_MASK)) | (val); \
 	} while (0)
-
 #define DUK_HEAPHDR_GET_TYPE(h)       ((h)->h_flags & DUK_HEAPHDR_FLAGS_TYPE_MASK)
 #define DUK_HEAPHDR_SET_TYPE(h,val)   do { \
 		(h)->h_flags = ((h)->h_flags & ~(DUK_HEAPHDR_FLAGS_TYPE_MASK)) | (val); \
@@ -278,7 +279,7 @@ struct duk_heaphdr_string {
  *  it is not required for INCREF, but it is included just in case.
  *
  *  Note that 'raw' macros such as DUK_HEAPHDR_GET_REFCOUNT() are not
- *  defined without DUK_USE_REFERENCE_COUNTING, so caller must #ifdef
+ *  defined without DUK_USE_REFERENCE_COUNTING, so caller must #if defined()
  *  around them.
  */
 
@@ -366,36 +367,21 @@ struct duk_heaphdr_string {
 /* Slow variants, call to a helper to reduce code size.
  * Can be used explicitly when size is always more important than speed.
  */
-#define DUK_TVAL_INCREF_SLOW(thr,tv) do { \
-		duk_tval_incref((tv)); \
-	} while (0)
-#define DUK_TVAL_DECREF_SLOW(thr,tv) do { \
-		duk_tval_decref((thr), (tv)); \
-	} while (0)
-#define DUK_TVAL_DECREF_NORZ_SLOW(thr,tv) do { \
-		duk_tval_decref_norz((thr), (tv)); \
-	} while (0)
-#define DUK_HEAPHDR_INCREF_SLOW(thr,h) do { \
-		duk_heaphdr_incref((duk_heaphdr *) (h)); \
-	} while (0)
-#define DUK_HSTRING_DECREF_SLOW(thr,h) do { \
-		duk_heaphdr_decref((thr), (duk_heaphdr *) (h)); \
-	} while (0)
-#define DUK_HSTRING_DECREF_NORZ_SLOW(thr,h) do { \
-		duk_heaphdr_decref_norz((thr), (duk_heaphdr *) (h)); \
-	} while (0)
-#define DUK_HBUFFER_DECREF_SLOW(thr,h) do { \
-		duk_heaphdr_decref((thr), (duk_heaphdr *) (h)); \
-	} while (0)
-#define DUK_HBUFFER_DECREF_NORZ_SLOW(thr,h) do { \
-		duk_heaphdr_decref_norz((thr), (duk_heaphdr *) (h)); \
-	} while (0)
-#define DUK_HOBJECT_DECREF_SLOW(thr,h) do { \
-		duk_heaphdr_decref((thr), (duk_heaphdr *) (h)); \
-	} while (0)
-#define DUK_HOBJECT_DECREF_NORZ_SLOW(thr,h) do { \
-		duk_heaphdr_decref_norz((thr), (duk_heaphdr *) (h)); \
-	} while (0)
+#define DUK_TVAL_INCREF_SLOW(thr,tv)         do { duk_tval_incref((tv)); } while (0)
+#define DUK_TVAL_DECREF_SLOW(thr,tv)         do { duk_tval_decref((thr), (tv)); } while (0)
+#define DUK_TVAL_DECREF_NORZ_SLOW(thr,tv)    do { duk_tval_decref_norz((thr), (tv)); } while (0)
+#define DUK_HEAPHDR_INCREF_SLOW(thr,h)       do { duk_heaphdr_incref((duk_heaphdr *) (h)); } while (0)
+#define DUK_HEAPHDR_DECREF_SLOW(thr,h)       do { duk_heaphdr_decref((thr), (duk_heaphdr *) (h)); } while (0)
+#define DUK_HEAPHDR_DECREF_NORZ_SLOW(thr,h)  do { duk_heaphdr_decref_norz((thr), (duk_heaphdr *) (h)); } while (0)
+#define DUK_HSTRING_INCREF_SLOW(thr,h)       do { duk_heaphdr_incref((duk_heaphdr *) (h)); } while (0)
+#define DUK_HSTRING_DECREF_SLOW(thr,h)       do { duk_heaphdr_decref((thr), (duk_heaphdr *) (h)); } while (0)
+#define DUK_HSTRING_DECREF_NORZ_SLOW(thr,h)  do { duk_heaphdr_decref_norz((thr), (duk_heaphdr *) (h)); } while (0)
+#define DUK_HBUFFER_INCREF_SLOW(thr,h)       do { duk_heaphdr_incref((duk_heaphdr *) (h)); } while (0)
+#define DUK_HBUFFER_DECREF_SLOW(thr,h)       do { duk_heaphdr_decref((thr), (duk_heaphdr *) (h)); } while (0)
+#define DUK_HBUFFER_DECREF_NORZ_SLOW(thr,h)  do { duk_heaphdr_decref_norz((thr), (duk_heaphdr *) (h)); } while (0)
+#define DUK_HOBJECT_INCREF_SLOW(thr,h)       do { duk_heaphdr_incref((duk_heaphdr *) (h)); } while (0)
+#define DUK_HOBJECT_DECREF_SLOW(thr,h)       do { duk_heaphdr_decref((thr), (duk_heaphdr *) (h)); } while (0)
+#define DUK_HOBJECT_DECREF_NORZ_SLOW(thr,h)  do { duk_heaphdr_decref_norz((thr), (duk_heaphdr *) (h)); } while (0)
 
 /* Default variants.  Selection depends on speed/size preference.
  * Concretely: with gcc 4.8.1 -Os x64 the difference in final binary
@@ -409,10 +395,8 @@ struct duk_heaphdr_string {
 #define DUK_TVAL_DECREF(thr,tv)                DUK_TVAL_DECREF_FAST((thr),(tv))
 #define DUK_TVAL_DECREF_NORZ(thr,tv)           DUK_TVAL_DECREF_NORZ_FAST((thr),(tv))
 #define DUK_HEAPHDR_INCREF(thr,h)              DUK_HEAPHDR_INCREF_FAST((thr),(h))
-#if 0  /* DUK_HEAPHDR_INCREF() is needed (it's generic) but generic DECREF is not. */
 #define DUK_HEAPHDR_DECREF(thr,h)              DUK_HEAPHDR_DECREF_FAST_RAW((thr),(h),duk_heaphdr_refzero,duk_heaphdr *)
 #define DUK_HEAPHDR_DECREF_NORZ(thr,h)         DUK_HEAPHDR_DECREF_FAST_RAW((thr),(h),duk_heaphdr_refzero_norz,duk_heaphdr *)
-#endif
 #define DUK_HSTRING_INCREF(thr,h)              DUK_HEAPHDR_INCREF((thr),(duk_heaphdr *) (h))
 #define DUK_HSTRING_DECREF(thr,h)              DUK_HEAPHDR_DECREF_FAST_RAW((thr),(h),duk_hstring_refzero,duk_hstring *)
 #define DUK_HSTRING_DECREF_NORZ(thr,h)         DUK_HEAPHDR_DECREF_FAST_RAW((thr),(h),duk_hstring_refzero,duk_hstring *)  /* no 'norz' variant */
@@ -439,10 +423,8 @@ struct duk_heaphdr_string {
 #define DUK_TVAL_DECREF(thr,tv)                DUK_TVAL_DECREF_SLOW((thr),(tv))
 #define DUK_TVAL_DECREF_NORZ(thr,tv)           DUK_TVAL_DECREF_NORZ_SLOW((thr),(tv))
 #define DUK_HEAPHDR_INCREF(thr,h)              DUK_HEAPHDR_INCREF_SLOW((thr),(h))
-#if 0
 #define DUK_HEAPHDR_DECREF(thr,h)              DUK_HEAPHDR_DECREF_SLOW((thr),(h))
 #define DUK_HEAPHDR_DECREF_NORZ(thr,h)         DUK_HEAPHDR_DECREF_NORZ_SLOW((thr),(h))
-#endif
 #define DUK_HSTRING_INCREF(thr,h)              DUK_HEAPHDR_INCREF((thr),(duk_heaphdr *) (h))
 #define DUK_HSTRING_DECREF(thr,h)              DUK_HSTRING_DECREF_SLOW((thr),(h))
 #define DUK_HSTRING_DECREF_NORZ(thr,h)         DUK_HSTRING_DECREF_NORZ_SLOW((thr),(h))
@@ -518,10 +500,13 @@ struct duk_heaphdr_string {
 /* Free pending refzero entries; quick check to avoid call because often
  * the queue is empty.
  */
-#define DUK_REFZERO_CHECK(thr) do { \
+#define DUK_REFZERO_CHECK_FAST(thr) do { \
 		if ((thr)->heap->refzero_list != NULL) { \
 			duk_refzero_free_pending((thr)); \
 		} \
+	} while (0)
+#define DUK_REFZERO_CHECK_SLOW(thr) do { \
+		duk_refzero_free_pending((thr)); \
 	} while (0)
 
 /*
@@ -574,7 +559,7 @@ struct duk_heaphdr_string {
 #define DUK_TVAL_SET_NUMBER_CHKFAST_UPDREF_ALT0(thr,tvptr_dst,newval) do { \
 		duk_tval *tv__dst; duk_tval tv__tmp; tv__dst = (tvptr_dst); \
 		DUK_TVAL_SET_TVAL(&tv__tmp, tv__dst); \
-		DUK_TVAL_SET_NUMBER_CHKFAST(tv__dst, (newval)); \
+		DUK_TVAL_SET_NUMBER_CHKFAST_FAST(tv__dst, (newval)); \
 		DUK_TVAL_DECREF((thr), &tv__tmp);  /* side effects */ \
 	} while (0)
 #define DUK_TVAL_SET_DOUBLE_UPDREF_ALT0(thr,tvptr_dst,newval) do { \
@@ -743,15 +728,34 @@ struct duk_heaphdr_string {
 #define DUK_HEAPHDR_INCREF(thr,h)              do {} while (0) /* nop */
 #define DUK_HEAPHDR_DECREF(thr,h)              do {} while (0) /* nop */
 #define DUK_HEAPHDR_DECREF_NORZ(thr,h)         do {} while (0) /* nop */
+#define DUK_HSTRING_INCREF_FAST(thr,h)         do {} while (0) /* nop */
+#define DUK_HSTRING_DECREF_FAST(thr,h)         do {} while (0) /* nop */
+#define DUK_HSTRING_DECREF_NORZ_FAST(thr,h)    do {} while (0) /* nop */
+#define DUK_HSTRING_INCREF_SLOW(thr,h)         do {} while (0) /* nop */
+#define DUK_HSTRING_DECREF_SLOW(thr,h)         do {} while (0) /* nop */
+#define DUK_HSTRING_DECREF_NORZ_SLOW(thr,h)    do {} while (0) /* nop */
 #define DUK_HSTRING_INCREF(thr,h)              do {} while (0) /* nop */
 #define DUK_HSTRING_DECREF(thr,h)              do {} while (0) /* nop */
 #define DUK_HSTRING_DECREF_NORZ(thr,h)         do {} while (0) /* nop */
+#define DUK_HOBJECT_INCREF_FAST(thr,h)         do {} while (0) /* nop */
+#define DUK_HOBJECT_DECREF_FAST(thr,h)         do {} while (0) /* nop */
+#define DUK_HOBJECT_DECREF_NORZ_FAST(thr,h)    do {} while (0) /* nop */
+#define DUK_HOBJECT_INCREF_SLOW(thr,h)         do {} while (0) /* nop */
+#define DUK_HOBJECT_DECREF_SLOW(thr,h)         do {} while (0) /* nop */
+#define DUK_HOBJECT_DECREF_NORZ_SLOW(thr,h)    do {} while (0) /* nop */
 #define DUK_HOBJECT_INCREF(thr,h)              do {} while (0) /* nop */
 #define DUK_HOBJECT_DECREF(thr,h)              do {} while (0) /* nop */
 #define DUK_HOBJECT_DECREF_NORZ(thr,h)         do {} while (0) /* nop */
+#define DUK_HBUFFER_INCREF_FAST(thr,h)         do {} while (0) /* nop */
+#define DUK_HBUFFER_DECREF_FAST(thr,h)         do {} while (0) /* nop */
+#define DUK_HBUFFER_DECREF_NORZ_FAST(thr,h)    do {} while (0) /* nop */
+#define DUK_HBUFFER_INCREF_SLOW(thr,h)         do {} while (0) /* nop */
+#define DUK_HBUFFER_DECREF_SLOW(thr,h)         do {} while (0) /* nop */
+#define DUK_HBUFFER_DECREF_NORZ_SLOW(thr,h)    do {} while (0) /* nop */
 #define DUK_HBUFFER_INCREF(thr,h)              do {} while (0) /* nop */
 #define DUK_HBUFFER_DECREF(thr,h)              do {} while (0) /* nop */
 #define DUK_HBUFFER_DECREF_NORZ(thr,h)         do {} while (0) /* nop */
+
 #define DUK_HCOMPFUNC_INCREF(thr,h)            do {} while (0) /* nop */
 #define DUK_HCOMPFUNC_DECREF(thr,h)            do {} while (0) /* nop */
 #define DUK_HCOMPFUNC_DECREF_NORZ(thr,h)       do {} while (0) /* nop */
@@ -767,7 +771,9 @@ struct duk_heaphdr_string {
 #define DUK_HOBJECT_INCREF_ALLOWNULL(thr,h)    do {} while (0) /* nop */
 #define DUK_HOBJECT_DECREF_ALLOWNULL(thr,h)    do {} while (0) /* nop */
 #define DUK_HOBJECT_DECREF_NORZ_ALLOWNULL(thr,h)  do {} while (0) /* nop */
-#define DUK_REFZERO_CHECK(thr)                 do {} while (0) /* nop */
+
+#define DUK_REFZERO_CHECK_FAST(thr)            do {} while (0) /* nop */
+#define DUK_REFZERO_CHECK_SLOW(thr)            do {} while (0) /* nop */
 
 #define DUK_TVAL_SET_UNDEFINED_UPDREF_ALT0(thr,tvptr_dst) do { \
 		duk_tval *tv__dst; tv__dst = (tvptr_dst); \
@@ -800,7 +806,7 @@ struct duk_heaphdr_string {
 	} while (0)
 #define DUK_TVAL_SET_NUMBER_CHKFAST_UPDREF_ALT0(thr,tvptr_dst,newval) do { \
 		duk_tval *tv__dst; tv__dst = (tvptr_dst); \
-		DUK_TVAL_SET_NUMBER_CHKFAST(tv__dst, (newval)); \
+		DUK_TVAL_SET_NUMBER_CHKFAST_FAST(tv__dst, (newval)); \
 		DUK_UNREF((thr)); \
 	} while (0)
 #define DUK_TVAL_SET_DOUBLE_UPDREF_ALT0(thr,tvptr_dst,newval) do { \
@@ -872,6 +878,7 @@ struct duk_heaphdr_string {
 	} while (0)
 
 #define DUK_TVAL_SET_UNDEFINED_UPDREF         DUK_TVAL_SET_UNDEFINED_UPDREF_ALT0
+#define DUK_TVAL_SET_UNDEFINED_UPDREF_NORZ    DUK_TVAL_SET_UNDEFINED_UPDREF_ALT0
 #define DUK_TVAL_SET_UNUSED_UPDREF            DUK_TVAL_SET_UNUSED_UPDREF_ALT0
 #define DUK_TVAL_SET_NULL_UPDREF              DUK_TVAL_SET_NULL_UPDREF_ALT0
 #define DUK_TVAL_SET_BOOLEAN_UPDREF           DUK_TVAL_SET_BOOLEAN_UPDREF_ALT0

@@ -44,34 +44,67 @@ DUK_INTERNAL duk_ret_t duk_bi_object_constructor(duk_context *ctx) {
 		return 1;
 	}
 
-	duk_push_object_helper(ctx,
-	                       DUK_HOBJECT_FLAG_EXTENSIBLE |
-	                       DUK_HOBJECT_CLASS_AS_FLAGS(DUK_HOBJECT_CLASS_OBJECT),
-	                       DUK_BIDX_OBJECT_PROTOTYPE);
+	(void) duk_push_object_helper(ctx,
+	                              DUK_HOBJECT_FLAG_EXTENSIBLE |
+	                              DUK_HOBJECT_CLASS_AS_FLAGS(DUK_HOBJECT_CLASS_OBJECT),
+	                              DUK_BIDX_OBJECT_PROTOTYPE);
 	return 1;
 }
 #endif  /* DUK_USE_OBJECT_BUILTIN */
 
+#if defined(DUK_USE_OBJECT_BUILTIN) && defined(DUK_USE_ES6)
+DUK_INTERNAL duk_ret_t duk_bi_object_constructor_assign(duk_context *ctx) {
+	duk_idx_t nargs;
+	duk_int_t idx;
+
+	nargs = duk_get_top_require_min(ctx, 1 /*min_top*/);
+
+	duk_to_object(ctx, 0);
+	for (idx = 1; idx < nargs; idx++) {
+		/* E7 19.1.2.1 (step 4a) */
+		if (duk_is_null_or_undefined(ctx, idx)) {
+			continue;
+		}
+
+		/* duk_enum() respects ES6+ [[OwnPropertyKeys]] ordering, which is
+		 * convenient here.
+		 */
+		duk_to_object(ctx, idx);
+		duk_enum(ctx, idx, DUK_ENUM_OWN_PROPERTIES_ONLY);
+		while (duk_next(ctx, -1, 1 /*get_value*/)) {
+			/* [ target ... enum key value ] */
+			duk_put_prop(ctx, 0);
+			/* [ target ... enum ] */
+		}
+		/* Could pop enumerator, but unnecessary because of duk_set_top()
+		 * below.
+		 */
+	}
+
+	duk_set_top(ctx, 1);
+	return 1;
+}
+#endif
+
+#if defined(DUK_USE_OBJECT_BUILTIN) && defined(DUK_USE_ES6)
+DUK_INTERNAL duk_ret_t duk_bi_object_constructor_is(duk_context *ctx) {
+	DUK_ASSERT_TOP(ctx, 2);
+	duk_push_boolean(ctx, duk_samevalue(ctx, 0, 1));
+	return 1;
+}
+#endif
+
 #if defined(DUK_USE_OBJECT_BUILTIN)
 DUK_INTERNAL duk_ret_t duk_bi_object_constructor_create(duk_context *ctx) {
-	duk_tval *tv;
-	duk_hobject *proto = NULL;
+	duk_hobject *proto;
 
 	DUK_ASSERT_TOP(ctx, 2);
 
 #if defined(DUK_USE_BUFFEROBJECT_SUPPORT)
 	duk_hbufobj_promote_plain(ctx, 0);
 #endif
-	tv = duk_get_tval(ctx, 0);
-	DUK_ASSERT(tv != NULL);
-	if (DUK_TVAL_IS_NULL(tv)) {
-		DUK_ASSERT(proto == NULL);
-	} else if (DUK_TVAL_IS_OBJECT(tv)) {
-		proto = DUK_TVAL_GET_OBJECT(tv);
-		DUK_ASSERT(proto != NULL);
-	} else {
-		DUK_DCERROR_TYPE_INVALID_ARGS((duk_hthread *) ctx);
-	}
+	proto = duk_require_hobject_accept_mask(ctx, 0, DUK_TYPE_MASK_NULL);
+	DUK_ASSERT(proto != NULL || duk_is_null(ctx, 0));
 
 	(void) duk_push_object_helper_proto(ctx,
 	                                    DUK_HOBJECT_FLAG_EXTENSIBLE |
@@ -189,6 +222,8 @@ DUK_INTERNAL duk_ret_t duk_bi_object_constructor_seal_freeze_shared(duk_context 
 	duk_hobject *h;
 	duk_bool_t is_freeze;
 
+	DUK_ASSERT_TOP(ctx, 1);
+
 	is_freeze = (duk_bool_t) duk_get_current_magic(ctx);
 	if (duk_is_buffer(ctx, 0)) {
 		/* Plain buffer: already sealed, but not frozen (and can't be frozen
@@ -211,8 +246,12 @@ DUK_INTERNAL duk_ret_t duk_bi_object_constructor_seal_freeze_shared(duk_context 
 	h = duk_require_hobject_promote_mask(ctx, 0, DUK_TYPE_MASK_LIGHTFUNC | DUK_TYPE_MASK_BUFFER);
 #endif
 
-	h = duk_require_hobject(ctx, 0);
-	DUK_ASSERT(h != NULL);
+	h = duk_get_hobject(ctx, 0);
+	if (h == NULL) {
+		/* ES6 Sections 19.1.2.5, 19.1.2.17 */
+		return 1;
+	}
+
 	if (is_freeze && DUK_HOBJECT_IS_BUFOBJ(h)) {
 		/* Buffer objects cannot be frozen because there's no internal
 		 * support for making virtual array indices non-writable.
@@ -238,7 +277,6 @@ DUK_INTERNAL duk_ret_t duk_bi_object_constructor_seal_freeze_shared(duk_context 
 DUK_INTERNAL duk_ret_t duk_bi_object_constructor_is_sealed_frozen_shared(duk_context *ctx) {
 	duk_hobject *h;
 	duk_bool_t is_frozen;
-	duk_bool_t rc;
 	duk_uint_t mask;
 
 	is_frozen = duk_get_current_magic(ctx);
@@ -249,9 +287,12 @@ DUK_INTERNAL duk_ret_t duk_bi_object_constructor_is_sealed_frozen_shared(duk_con
 		                          1 :               /* lightfunc always frozen and sealed */
 		                          (is_frozen ^ 1)); /* buffer sealed but not frozen (index props writable) */
 	} else {
-		h = duk_require_hobject(ctx, 0);
-		rc = duk_hobject_object_is_sealed_frozen_helper((duk_hthread *) ctx, h, is_frozen /*is_frozen*/);
-		duk_push_boolean(ctx, rc);
+		/* ES6 Sections 19.1.2.12, 19.1.2.13: anything other than an object
+		 * is considered to be already sealed and frozen.
+		 */
+		h = duk_get_hobject(ctx, 0);
+		duk_push_boolean(ctx, (h == NULL) ||
+		                      duk_hobject_object_is_sealed_frozen_helper((duk_hthread *) ctx, h, is_frozen /*is_frozen*/));
 	}
 	return 1;
 }
@@ -261,7 +302,7 @@ DUK_INTERNAL duk_ret_t duk_bi_object_constructor_is_sealed_frozen_shared(duk_con
 DUK_INTERNAL duk_ret_t duk_bi_object_prototype_to_locale_string(duk_context *ctx) {
 	DUK_ASSERT_TOP(ctx, 0);
 	(void) duk_push_this_coercible_to_object(ctx);
-	duk_get_prop_stridx(ctx, 0, DUK_STRIDX_TO_STRING);
+	duk_get_prop_stridx_short(ctx, 0, DUK_STRIDX_TO_STRING);
 #if 0  /* This is mentioned explicitly in the E5.1 spec, but duk_call_method() checks for it in practice. */
 	duk_require_callable(ctx, 1);
 #endif
@@ -333,13 +374,20 @@ DUK_INTERNAL duk_ret_t duk_bi_object_getprototype_shared(duk_context *ctx) {
 	duk_hobject *h;
 	duk_hobject *proto;
 	duk_tval *tv;
+	duk_int_t magic;
 
-	if (duk_get_current_magic(ctx) == 0) {
-		tv = DUK_HTHREAD_THIS_PTR(thr);
-	} else {
-		DUK_ASSERT(duk_get_top(ctx) >= 1);
-		tv = DUK_GET_TVAL_POSIDX(ctx, 0);
+	magic = duk_get_current_magic(ctx);
+
+	if (magic == 0) {
+		DUK_ASSERT_TOP(ctx, 0);
+		duk_push_this_coercible_to_object(ctx);
 	}
+	DUK_ASSERT(duk_get_top(ctx) >= 1);
+	if (magic < 2) {
+		/* ES6 Section 19.1.2.9, step 1 */
+		duk_to_object(ctx, 0);
+	}
+	tv = DUK_GET_TVAL_POSIDX(ctx, 0);
 
 	switch (DUK_TVAL_GET_TAG(tv)) {
 	case DUK_TAG_BUFFER:
@@ -558,44 +606,79 @@ DUK_INTERNAL duk_ret_t duk_bi_object_constructor_define_property(duk_context *ct
 
 #if defined(DUK_USE_OBJECT_BUILTIN) || defined(DUK_USE_REFLECT_BUILTIN)
 DUK_INTERNAL duk_ret_t duk_bi_object_constructor_get_own_property_descriptor(duk_context *ctx) {
-	/* XXX: no need for indirect call */
-	return duk_hobject_object_get_own_property_descriptor(ctx);
-}
-#endif  /* DUK_USE_OBJECT_BUILTIN || DUK_USE_REFLECT_BUILTIN */
+	DUK_ASSERT_TOP(ctx, 2);
 
-#if defined(DUK_USE_OBJECT_BUILTIN) || defined(DUK_USE_REFLECT_BUILTIN)
-DUK_INTERNAL duk_ret_t duk_bi_object_constructor_is_extensible(duk_context *ctx) {
-	duk_hobject *h;
+	/* ES6 Section 19.1.2.6, step 1 */
+	if (duk_get_current_magic(ctx) == 0) {
+		duk_to_object(ctx, 0);
+	}
 
-	h = duk_require_hobject_accept_mask(ctx, 0, DUK_TYPE_MASK_LIGHTFUNC | DUK_TYPE_MASK_BUFFER);
-	duk_push_boolean(ctx, h != NULL && DUK_HOBJECT_HAS_EXTENSIBLE(h));
+	/* [ obj key ] */
+
+	duk_hobject_object_get_own_property_descriptor(ctx, -2);
 	return 1;
 }
 #endif  /* DUK_USE_OBJECT_BUILTIN || DUK_USE_REFLECT_BUILTIN */
 
 #if defined(DUK_USE_OBJECT_BUILTIN) || defined(DUK_USE_REFLECT_BUILTIN)
-/* Shared helper for Object.getOwnPropertyNames() and Object.keys().
- * Magic: 0=Object.getOwnPropertyNames() or Reflect.ownKeys(), 1=Object.keys().
- */
+DUK_INTERNAL duk_ret_t duk_bi_object_constructor_is_extensible(duk_context *ctx) {
+	/*
+	 *  magic = 0: Object.isExtensible()
+	 *  magic = 1: Reflect.isExtensible()
+	 */
+
+	duk_hobject *h;
+
+	if (duk_get_current_magic(ctx) == 0) {
+		h = duk_get_hobject(ctx, 0);
+	} else {
+		/* Reflect.isExtensible(): throw if non-object, but we accept lightfuncs
+		 * and plain buffers here because they pretend to be objects.
+		 */
+		h = duk_require_hobject_accept_mask(ctx, 0, DUK_TYPE_MASK_LIGHTFUNC | DUK_TYPE_MASK_BUFFER);
+	}
+
+	duk_push_boolean(ctx, (h != NULL) && DUK_HOBJECT_HAS_EXTENSIBLE(h));
+	return 1;
+}
+#endif  /* DUK_USE_OBJECT_BUILTIN || DUK_USE_REFLECT_BUILTIN */
+
+#if defined(DUK_USE_OBJECT_BUILTIN) || defined(DUK_USE_REFLECT_BUILTIN)
 DUK_INTERNAL duk_ret_t duk_bi_object_constructor_keys_shared(duk_context *ctx) {
+	/*
+	 *  magic = 0: Object.getOwnPropertyNames()
+	 *  magic = 1: Reflect.ownKeys()
+	 *  magic = 2: Object.keys()
+	 */
+
 	duk_hthread *thr = (duk_hthread *) ctx;
 	duk_hobject *obj;
 #if defined(DUK_USE_ES6_PROXY)
 	duk_hobject *h_proxy_target;
 	duk_hobject *h_proxy_handler;
 	duk_hobject *h_trap_result;
-	duk_uarridx_t i, len, idx;
 #endif
 	duk_small_uint_t enum_flags;
+	duk_int_t magic;
 
 	DUK_ASSERT_TOP(ctx, 1);
 	DUK_UNREF(thr);
 
-	obj = duk_require_hobject_promote_mask(ctx, 0, DUK_TYPE_MASK_LIGHTFUNC | DUK_TYPE_MASK_BUFFER);
+	magic = duk_get_current_magic(ctx);
+	if (magic == 1) {
+		/* ES6 Section 26.1.11 requires a TypeError for non-objects.  Lightfuncs
+		 * and plain buffers pretend to be objects, so accept those too.
+		 */
+		obj = duk_require_hobject_promote_mask(ctx, 0, DUK_TYPE_MASK_LIGHTFUNC | DUK_TYPE_MASK_BUFFER);
+	} else {
+		/* ES6: ToObject coerce. */
+		obj = duk_to_hobject(ctx, 0);
+	}
 	DUK_ASSERT(obj != NULL);
 	DUK_UNREF(obj);
 
 #if defined(DUK_USE_ES6_PROXY)
+	/* XXX: better sharing of code between proxy target call sites */
 	if (DUK_LIKELY(!duk_hobject_proxy_check(thr,
 	                                        obj,
 	                                        &h_proxy_target,
@@ -604,7 +687,7 @@ DUK_INTERNAL duk_ret_t duk_bi_object_constructor_keys_shared(duk_context *ctx) {
 	}
 
 	duk_push_hobject(ctx, h_proxy_handler);
-	if (!duk_get_prop_stridx(ctx, -1, DUK_STRIDX_OWN_KEYS)) {
+	if (!duk_get_prop_stridx_short(ctx, -1, DUK_STRIDX_OWN_KEYS)) {
 		/* Careful with reachability here: don't pop 'obj' before pushing
 		 * proxy target.
 		 */
@@ -623,38 +706,7 @@ DUK_INTERNAL duk_ret_t duk_bi_object_constructor_keys_shared(duk_context *ctx) {
 	h_trap_result = duk_require_hobject(ctx, -1);
 	DUK_UNREF(h_trap_result);
 
-	len = (duk_uarridx_t) duk_get_length(ctx, -1);
-	idx = 0;
-	duk_push_array(ctx);
-	for (i = 0; i < len; i++) {
-		/* [ obj trap_result res_arr ] */
-		if (duk_get_prop_index(ctx, -2, i) && duk_is_string(ctx, -1)) {
-			/* XXX: for Object.keys() we should check enumerability of key */
-			/* [ obj trap_result res_arr propname ] */
-			duk_put_prop_index(ctx, -2, idx);
-			idx++;
-		} else {
-			duk_pop(ctx);
-		}
-	}
-
-	/* XXX: missing trap result validation for non-configurable target keys
-	 * (must be present), for non-extensible target all target keys must be
-	 * present and no extra keys can be present.
-	 * http://www.ecma-international.org/ecma-262/6.0/#sec-proxy-object-internal-methods-and-internal-slots-ownpropertykeys
-	 */
-
-	/* XXX: for Object.keys() the [[OwnPropertyKeys]] result (trap result)
-	 * should be filtered so that only enumerable keys remain.  Enumerability
-	 * should be checked with [[GetOwnProperty]] on the original object
-	 * (i.e., the proxy in this case).  If the proxy has a getOwnPropertyDescriptor
-	 * trap, it should be triggered for every property.  If the proxy doesn't have
-	 * the trap, enumerability should be checked against the target object instead.
-	 * We don't do any of this now, so Object.keys() and Object.getOwnPropertyNames()
-	 * return the same result now for proxy traps.  We still do clean up the trap
-	 * result, so that Object.keys() and Object.getOwnPropertyNames() will return a
-	 * clean array of strings without gaps.
-	 */
+	duk_proxy_ownkeys_postprocess(ctx, h_proxy_target, (magic == 2) /*enumerable_only*/);
 	return 1;
 
  skip_proxy:
@@ -662,12 +714,12 @@ DUK_INTERNAL duk_ret_t duk_bi_object_constructor_keys_shared(duk_context *ctx) {
 
 	DUK_ASSERT_TOP(ctx, 1);
 
-	if (duk_get_current_magic(ctx)) {
+	if (magic == 2) {
 		/* Object.keys */
 		enum_flags = DUK_ENUM_OWN_PROPERTIES_ONLY |
 		             DUK_ENUM_NO_PROXY_BEHAVIOR;
 	} else {
-		/* Object.getOwnPropertyNames */
+		/* Object.getOwnPropertyNames or Reflect.ownKeys */
 		enum_flags = DUK_ENUM_INCLUDE_NONENUMERABLE |
 		             DUK_ENUM_OWN_PROPERTIES_ONLY |
 		             DUK_ENUM_NO_PROXY_BEHAVIOR;
@@ -686,12 +738,26 @@ DUK_INTERNAL duk_ret_t duk_bi_object_constructor_prevent_extensions(duk_context 
 
 	duk_hthread *thr = (duk_hthread *) ctx;
 	duk_hobject *h;
+	duk_uint_t mask;
 	duk_int_t magic;
 
 	magic = duk_get_current_magic(ctx);
 
-	if (duk_check_type_mask(ctx, 0, DUK_TYPE_MASK_LIGHTFUNC | DUK_TYPE_MASK_BUFFER)) {
-		/* Lightfunc or plain buffer, already non-extensible so always success. */
+	/* Silent success for lightfuncs and plain buffers always. */
+	mask = DUK_TYPE_MASK_LIGHTFUNC | DUK_TYPE_MASK_BUFFER;
+
+	/* Object.preventExtensions() silent success for non-object. */
+	if (magic == 0) {
+		mask |= DUK_TYPE_MASK_UNDEFINED |
+		        DUK_TYPE_MASK_NULL |
+		        DUK_TYPE_MASK_BOOLEAN |
+		        DUK_TYPE_MASK_NUMBER |
+		        DUK_TYPE_MASK_STRING |
+		        DUK_TYPE_MASK_POINTER;
+	}
+
+	if (duk_check_type_mask(ctx, 0, mask)) {
+		/* Not an object, already non-extensible so always success. */
 		goto done;
 	}
 	h = duk_require_hobject(ctx, 0);

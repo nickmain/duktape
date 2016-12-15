@@ -67,8 +67,7 @@ DUK_LOCAL void duk__err_augment_user(duk_hthread *thr, duk_small_uint_t stridx_c
 
 	DUK_ASSERT(thr != NULL);
 	DUK_ASSERT(thr->heap != NULL);
-	DUK_ASSERT_DISABLE(stridx_cb >= 0);  /* unsigned */
-	DUK_ASSERT(stridx_cb < DUK_HEAP_NUM_STRINGS);
+	DUK_ASSERT_STRIDX_VALID(stridx_cb);
 
 	if (DUK_HEAP_HAS_ERRHANDLER_RUNNING(thr->heap)) {
 		DUK_DD(DUK_DDPRINT("recursive call to error handler, ignore"));
@@ -293,12 +292,12 @@ DUK_LOCAL void duk__add_traceback(duk_hthread *thr, duk_hthread *thr_callstack, 
 	/* [ ... error c_filename? arr ] */
 
 	if (c_filename) {
-		duk_remove(ctx, -2);
+		duk_remove_m2(ctx);
 	}
 
 	/* [ ... error arr ] */
 
-	duk_xdef_prop_stridx_wec(ctx, -2, DUK_STRIDX_INT_TRACEDATA);  /* -> [ ... error ] */
+	duk_xdef_prop_stridx_short_wec(ctx, -2, DUK_STRIDX_INT_TRACEDATA);  /* -> [ ... error ] */
 }
 #endif  /* DUK_USE_TRACEBACKS */
 
@@ -379,7 +378,7 @@ DUK_LOCAL void duk__add_fileline(duk_hthread *thr, duk_hthread *thr_callstack, c
 
 			/* [ ... error func ] */
 
-			duk_get_prop_stridx(ctx, -1, DUK_STRIDX_FILE_NAME);
+			duk_get_prop_stridx_short(ctx, -1, DUK_STRIDX_FILE_NAME);
 			if (!duk_is_string(ctx, -1)) {
 				duk_pop_2(ctx);
 				continue;
@@ -418,8 +417,8 @@ DUK_LOCAL void duk__add_fileline(duk_hthread *thr, duk_hthread *thr_callstack, c
 #if defined(DUK_USE_ASSERTIONS)
 	DUK_ASSERT(duk_get_top(ctx) == entry_top + 2);
 #endif
-	duk_xdef_prop_stridx(ctx, -3, DUK_STRIDX_FILE_NAME, DUK_PROPDESC_FLAGS_WC | DUK_PROPDESC_FLAG_NO_OVERWRITE);
-	duk_xdef_prop_stridx(ctx, -2, DUK_STRIDX_LINE_NUMBER, DUK_PROPDESC_FLAGS_WC | DUK_PROPDESC_FLAG_NO_OVERWRITE);
+	duk_xdef_prop_stridx_short(ctx, -3, DUK_STRIDX_FILE_NAME, DUK_PROPDESC_FLAGS_C | DUK_PROPDESC_FLAG_NO_OVERWRITE);
+	duk_xdef_prop_stridx_short(ctx, -2, DUK_STRIDX_LINE_NUMBER, DUK_PROPDESC_FLAGS_C | DUK_PROPDESC_FLAG_NO_OVERWRITE);
 }
 #endif  /* DUK_USE_AUGMENT_ERROR_CREATE && !DUK_USE_TRACEBACKS */
 
@@ -449,10 +448,10 @@ DUK_LOCAL void duk__add_compiler_error_line(duk_hthread *thr) {
 	DUK_DDD(DUK_DDDPRINT("compile error, before adding line info: %!T",
 	                     (duk_tval *) duk_get_tval(ctx, -1)));
 
-	if (duk_get_prop_stridx(ctx, -1, DUK_STRIDX_MESSAGE)) {
+	if (duk_get_prop_stridx_short(ctx, -1, DUK_STRIDX_MESSAGE)) {
 		duk_push_sprintf(ctx, " (line %ld)", (long) thr->compile_ctx->curr_token.start_line);
 		duk_concat(ctx, 2);
-		duk_put_prop_stridx(ctx, -2, DUK_STRIDX_MESSAGE);
+		duk_put_prop_stridx_short(ctx, -2, DUK_STRIDX_MESSAGE);
 	} else {
 		duk_pop(ctx);
 	}

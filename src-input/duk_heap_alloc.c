@@ -4,14 +4,6 @@
 
 #include "duk_internal.h"
 
-/* Constants for built-in string data depacking. */
-#define DUK__BITPACK_LETTER_LIMIT  26
-#define DUK__BITPACK_UNDERSCORE    26
-#define DUK__BITPACK_FF            27
-#define DUK__BITPACK_SWITCH1       29
-#define DUK__BITPACK_SWITCH        30
-#define DUK__BITPACK_SEVENBIT      31
-
 #if defined(DUK_USE_ROM_STRINGS)
 /* Fixed seed value used with ROM strings. */
 #define DUK__FIXED_HASH_SEED       0xabcd1234
@@ -156,7 +148,6 @@ DUK_LOCAL void duk__free_refzero_list(duk_heap *heap) {
 }
 #endif
 
-#if defined(DUK_USE_MARK_AND_SWEEP)
 DUK_LOCAL void duk__free_markandsweep_finalize_list(duk_heap *heap) {
 	duk_heaphdr *curr;
 	duk_heaphdr *next;
@@ -170,7 +161,6 @@ DUK_LOCAL void duk__free_markandsweep_finalize_list(duk_heap *heap) {
 		curr = next;
 	}
 }
-#endif
 
 DUK_LOCAL void duk__free_stringtable(duk_heap *heap) {
 	/* strings are only tracked by stringtable */
@@ -192,9 +182,7 @@ DUK_LOCAL void duk__free_run_finalizers(duk_heap *heap) {
 #if defined(DUK_USE_REFERENCE_COUNTING)
 	DUK_ASSERT(heap->refzero_list == NULL);  /* refzero not running -> must be empty */
 #endif
-#if defined(DUK_USE_MARK_AND_SWEEP)
 	DUK_ASSERT(heap->finalize_list == NULL);  /* mark-and-sweep not running -> must be empty */
-#endif
 
 	/* XXX: here again finalizer thread is the heap_thread which needs
 	 * to be coordinated with finalizer thread fixes.
@@ -300,7 +288,6 @@ DUK_INTERNAL void duk_heap_free(duk_heap *heap) {
 	 * XXX: this perhaps requires an execution time limit.
 	 */
 	DUK_D(DUK_DPRINT("execute finalizers before freeing heap"));
-#if defined(DUK_USE_MARK_AND_SWEEP)
 	/* Run mark-and-sweep a few times just in case (unreachable object
 	 * finalizers run already here).  The last round must rescue objects
 	 * from the previous round without running any more finalizers.  This
@@ -315,7 +302,6 @@ DUK_INTERNAL void duk_heap_free(duk_heap *heap) {
 	duk_heap_mark_and_sweep(heap, 0);
 	DUK_D(DUK_DPRINT("forced gc #3 in heap destruction (don't run finalizers)"));
 	duk_heap_mark_and_sweep(heap, DUK_MS_FLAG_SKIP_FINALIZERS);  /* skip finalizers; queue finalizable objects to heap_allocated */
-#endif
 
 #if defined(DUK_USE_FINALIZER_SUPPORT)
 	DUK_HEAP_SET_FINALIZER_NORESCUE(heap);  /* rescue no longer supported */
@@ -334,10 +320,8 @@ DUK_INTERNAL void duk_heap_free(duk_heap *heap) {
 	duk__free_refzero_list(heap);
 #endif
 
-#if defined(DUK_USE_MARK_AND_SWEEP)
 	DUK_D(DUK_DPRINT("freeing mark-and-sweep finalize list of heap: %p", (void *) heap));
 	duk__free_markandsweep_finalize_list(heap);
-#endif
 
 	DUK_D(DUK_DPRINT("freeing string table of heap: %p", (void *) heap));
 	duk__free_stringtable(heap);
@@ -381,7 +365,7 @@ DUK_LOCAL duk_bool_t duk__init_heap_strings(duk_heap *heap) {
 DUK_LOCAL duk_bool_t duk__init_heap_strings(duk_heap *heap) {
 	duk_bitdecoder_ctx bd_ctx;
 	duk_bitdecoder_ctx *bd = &bd_ctx;  /* convenience */
-	duk_small_uint_t i, j;
+	duk_small_uint_t i;
 
 	DUK_MEMZERO(&bd_ctx, sizeof(bd_ctx));
 	bd->data = (const duk_uint8_t *) duk_strings_data;
@@ -391,38 +375,8 @@ DUK_LOCAL duk_bool_t duk__init_heap_strings(duk_heap *heap) {
 		duk_uint8_t tmp[DUK_STRDATA_MAX_STRLEN];
 		duk_hstring *h;
 		duk_small_uint_t len;
-		duk_small_uint_t mode;
-		duk_small_uint_t t;
 
-		len = duk_bd_decode(bd, 5);
-		mode = 32;  /* 0 = uppercase, 32 = lowercase (= 'a' - 'A') */
-		for (j = 0; j < len; j++) {
-			t = duk_bd_decode(bd, 5);
-			if (t < DUK__BITPACK_LETTER_LIMIT) {
-				t = t + DUK_ASC_UC_A + mode;
-			} else if (t == DUK__BITPACK_UNDERSCORE) {
-				t = DUK_ASC_UNDERSCORE;
-			} else if (t == DUK__BITPACK_FF) {
-				/* Internal keys are prefixed with 0xFF in the stringtable
-				 * (which makes them invalid UTF-8 on purpose).
-				 */
-				t = 0xff;
-			} else if (t == DUK__BITPACK_SWITCH1) {
-				t = duk_bd_decode(bd, 5);
-				DUK_ASSERT_DISABLE(t >= 0);  /* unsigned */
-				DUK_ASSERT(t <= 25);
-				t = t + DUK_ASC_UC_A + (mode ^ 32);
-			} else if (t == DUK__BITPACK_SWITCH) {
-				mode = mode ^ 32;
-				t = duk_bd_decode(bd, 5);
-				DUK_ASSERT_DISABLE(t >= 0);
-				DUK_ASSERT(t <= 25);
-				t = t + DUK_ASC_UC_A + mode;
-			} else if (t == DUK__BITPACK_SEVENBIT) {
-				t = duk_bd_decode(bd, 7);
-			}
-			tmp[j] = (duk_uint8_t) t;
-		}
+		len = duk_bd_decode_bitpacked_string(bd, tmp);
 
 		/* No need to length check string: it will never exceed even
 		 * the 16-bit length maximum.
@@ -836,9 +790,7 @@ duk_heap *duk_heap_alloc(duk_alloc_function alloc_func,
 	res->refzero_list = NULL;
 	res->refzero_list_tail = NULL;
 #endif
-#if defined(DUK_USE_MARK_AND_SWEEP)
 	res->finalize_list = NULL;
-#endif
 	res->heap_thread = NULL;
 	res->curr_thread = NULL;
 	res->heap_object = NULL;

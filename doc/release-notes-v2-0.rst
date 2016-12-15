@@ -10,6 +10,9 @@ Main changes in this release (see RELEASES.rst for full details):
 * Improve buffer bindings: plain buffers now behave like ArrayBuffers,
   and Duktape.Buffer has been removed with ArrayBuffer taking its place.
 
+* Many built-in behaviors have been aligned with ES6 or ES7, so there are
+  small behavioral changes throughout.
+
 * FIXME
 
 The release has API incompatible changes, see upgrading notes below.
@@ -108,6 +111,12 @@ To upgrade:
 
   - Finally, you can remove your custom header and add the equivalent options
     to ``tools/configure.py`` when possible.
+
+Config option changes
+---------------------
+
+There are several new config options and some existing config options have
+been removed.
 
 Built-ins disabled in configuration are now absent
 --------------------------------------------------
@@ -801,6 +810,18 @@ To upgrade:
           /* ... */
       }
 
+Debugger command callstack index changes
+----------------------------------------
+
+Debug command callstack indexes have been made mandatory where appropriate to
+simplify the protocol.  Affected commands are: GetVar, PutVar, GetLocals, and
+Eval.
+
+To upgrade:
+
+* Review debug client handling of callstack indices when sending affected
+  commands.
+
 Debugger print/alert and logger forwarding removed
 --------------------------------------------------
 
@@ -1010,6 +1031,14 @@ Other incompatible changes
 * If a user function is called using the identifier 'eval', such a call won't
   get tailcall optimized even if otherwise possible.
 
+* ``duk_gc()`` no longer accepts a NULL context pointer for consistence with
+  other API calls.  A NULL pointer not causes memory unsafe behavior, as with
+  all other API calls.
+
+* ``duk_def_prop()`` now ToString() coerces its argument rather than requiring
+  the key to be a string.  This allows e.g. numbers to be used as property
+  keys.
+
 * ``duk_char_code_at()`` and ``String.charCodeAt()`` now return 0xFFFD (Unicode
   replacement character) if the string cannot be decoded as extended UTF-8,
   previously an error was thrown.  This situation never occurs for standard
@@ -1023,6 +1052,59 @@ Other incompatible changes
   more closely with ES6 Annex B and other engines: "\078" is not accepted and
   is the same as "\u00078", "\8" and "\9" are accepted as literal "8" and "9"
   (even in strict mode).
+
+* The NetBSD pow() workaround option ``DUK_USE_POW_NETBSD_WORKAROUND`` has been
+  generalized and renamed to ``DUK_USE_POW_WORKAROUNDS``.
+
+* When using a Proxy as a for-in target the "ownKeys" trap is invoked instead
+  of the "enumerate" trap in ES7.  Duktape now follows this behavior.  The
+  "enumerate" trap has been obsoleted.  Key enumerability is also now checked
+  when "ownKeys" trap is used in Object.keys() and for-in.
+
+* Bound function internal prototype is copied from the target function to match
+  ES6 requirements; in ES5 (and Duktape 1.x) bound function internal prototype
+  is always set to Function.prototype.
+
+* Function.prototype.toString() output has been changed to match ES6
+  requirements.  For example ``function foo() {"ecmascript"}`` is now
+  ``function foo() { [ecmascript code] }``.
+
+* Function ``.name`` and ``.length`` properties are now non-writable,
+  non-enumerable, but configurable, to match revised ES6 semantics.  Previously
+  the properties were also non-configurable.
+
+* Function ``.fileName`` property is now non-writable, non-enumerable, and
+  configurable.  Previously it was writable, non-enumerable, and configurable.
+  While this is not required by ES6 (as the property is non-standard), it has
+  been aligned with ``.name``.  Direct assignment to the property will be
+  rejected, but you can set it using e.g.
+  ``Object.defineProperty(func, 'fileName', { value: 'myFilename.js' });``.
+
+* Error instance ``.fileName`` and ``.lineNumber`` property attributes are
+  also non-writable, non-enumerable, but configurable.  This only matters when
+  tracebacks are disabled and concrete properties are used instead of the
+  inherited accessors.
+
+* Object constructor methods like Object.keys(), Object.freeze(), etc now
+  follow more lenient ES6 coercion semantics: non-object arguments are either
+  coerced to objects or treated like non-extensible objects with no own
+  properties.
+
+* RegExp.prototype follows ES6 behavior more closely: it is no longer a RegExp
+  instance, .source, .global, .ignoreCase, and .multiline are now inherited
+  getters, etc.  However, leniency to allow e.g. RegExp.prototype.source (from
+  ES2017 draft) is supported for real world code compatibility.
+
+* Duktape.info() now returns an object rather than an array.  The object has
+  named properties like ``.type`` and ``.enext`` for the internal fields which
+  is easier to version and work with.  The names of the properties are not
+  under version guarantees and may change in an incompatible fashion in even a
+  minor release.
+
+* Memory management without mark-and-sweep is no longer supported; relying on
+  only refcounting was error prone because reference cycles or debugger use
+  could result in leaked garbage that would only get collected on heap
+  destruction.
 
 Known issues
 ============

@@ -276,7 +276,7 @@ DUK_INTERNAL void duk_hobject_enumerator_create(duk_context *ctx, duk_small_uint
 	enum_target = duk_require_hobject(ctx, -1);
 	DUK_ASSERT(enum_target != NULL);
 
-	duk_push_object_internal(ctx);
+	duk_push_bare_object(ctx);
 	res = duk_known_hobject(ctx, -1);
 
 	/* [enum_target res] */
@@ -287,11 +287,11 @@ DUK_INTERNAL void duk_hobject_enumerator_create(duk_context *ctx, duk_small_uint
 	 * real object to check against.
 	 */
 	duk_push_hobject(ctx, enum_target);
-	duk_put_prop_stridx(ctx, -2, DUK_STRIDX_INT_TARGET);
+	duk_put_prop_stridx_short(ctx, -2, DUK_STRIDX_INT_TARGET);
 
 	/* Initialize index so that we skip internal control keys. */
 	duk_push_int(ctx, DUK__ENUM_START_INDEX);
-	duk_put_prop_stridx(ctx, -2, DUK_STRIDX_INT_NEXT);
+	duk_put_prop_stridx_short(ctx, -2, DUK_STRIDX_INT_NEXT);
 
 	/*
 	 *  Proxy object handling
@@ -308,20 +308,25 @@ DUK_INTERNAL void duk_hobject_enumerator_create(duk_context *ctx, duk_small_uint
 		goto skip_proxy;
 	}
 
+	/* XXX: share code with Object.keys() Proxy handling */
+
+	/* In ES6 for-in invoked the "enumerate" trap; in ES7 "enumerate"
+	 * has been obsoleted and "ownKeys" is used instead.
+	 */
 	DUK_DDD(DUK_DDDPRINT("proxy enumeration"));
 	duk_push_hobject(ctx, h_proxy_handler);
-	if (!duk_get_prop_stridx(ctx, -1, DUK_STRIDX_ENUMERATE)) {
+	if (!duk_get_prop_stridx_short(ctx, -1, DUK_STRIDX_OWN_KEYS)) {
 		/* No need to replace the 'enum_target' value in stack, only the
 		 * enum_target reference.  This also ensures that the original
 		 * enum target is reachable, which keeps the proxy and the proxy
 		 * target reachable.  We do need to replace the internal _Target.
 		 */
-		DUK_DDD(DUK_DDDPRINT("no enumerate trap, enumerate proxy target instead"));
+		DUK_DDD(DUK_DDDPRINT("no ownKeys trap, enumerate proxy target instead"));
 		DUK_DDD(DUK_DDDPRINT("h_proxy_target=%!O", (duk_heaphdr *) h_proxy_target));
 		enum_target = h_proxy_target;
 
 		duk_push_hobject(ctx, enum_target);  /* -> [ ... enum_target res handler undefined target ] */
-		duk_put_prop_stridx(ctx, -4, DUK_STRIDX_INT_TARGET);
+		duk_put_prop_stridx_short(ctx, -4, DUK_STRIDX_INT_TARGET);
 
 		duk_pop_2(ctx);  /* -> [ ... enum_target res ] */
 		goto skip_proxy;
@@ -334,29 +339,25 @@ DUK_INTERNAL void duk_hobject_enumerator_create(duk_context *ctx, duk_small_uint
 	h_trap_result = duk_require_hobject(ctx, -1);
 	DUK_UNREF(h_trap_result);
 
-	/* Copy trap result keys into the enumerator object. */
+	/* XXX: more filter flags? */
+	duk_proxy_ownkeys_postprocess(ctx, h_proxy_target, (enum_flags & DUK_ENUM_INCLUDE_NONENUMERABLE) ? 0 : 1 /*enumerable_only*/);
+	/* -> [ ... enum_target res trap_result keys_array ] */
+
+	/* Copy cleaned up trap result keys into the enumerator object. */
+	/* XXX: result is a dense array; could make use of that. */
+	DUK_ASSERT(duk_is_array(ctx, -1));
 	len = (duk_uint_fast32_t) duk_get_length(ctx, -1);
 	for (i = 0; i < len; i++) {
-		/* XXX: not sure what the correct semantic details are here,
-		 * e.g. handling of missing values (gaps), handling of non-array
-		 * trap results, etc.
-		 *
-		 * For keys, we simply skip non-string keys which seems to be
-		 * consistent with how e.g. Object.keys() will process proxy trap
-		 * results (ES6, Section 19.1.2.14).
-		 */
-		if (duk_get_prop_index(ctx, -1, i) && duk_is_string(ctx, -1)) {
-			/* [ ... enum_target res trap_result val ] */
-			duk_push_true(ctx);
-			/* [ ... enum_target res trap_result val true ] */
-			duk_put_prop(ctx, -4);
-		} else {
-			duk_pop(ctx);
-		}
+		(void) duk_get_prop_index(ctx, -1, i);
+		DUK_ASSERT(duk_is_string(ctx, -1));  /* postprocess cleaned up */
+		/* [ ... enum_target res trap_result keys_array val ] */
+		duk_push_true(ctx);
+		/* [ ... enum_target res trap_result keys_array val true ] */
+		duk_put_prop(ctx, -5);
 	}
-	/* [ ... enum_target res trap_result ] */
-	duk_pop(ctx);
-	duk_remove(ctx, -2);
+	/* [ ... enum_target res trap_result keys_array ] */
+	duk_pop_2(ctx);
+	duk_remove_m2(ctx);
 
 	/* [ ... res ] */
 
@@ -594,7 +595,7 @@ DUK_INTERNAL void duk_hobject_enumerator_create(duk_context *ctx, duk_small_uint
 
 	/* [enum_target res] */
 
-	duk_remove(ctx, -2);
+	duk_remove_m2(ctx);
 
 	/* [res] */
 
@@ -644,7 +645,7 @@ DUK_INTERNAL duk_bool_t duk_hobject_enumerator_next(duk_context *ctx, duk_bool_t
 	e = duk_require_hobject(ctx, -1);
 
 	/* XXX use get tval ptr, more efficient */
-	duk_get_prop_stridx(ctx, -1, DUK_STRIDX_INT_NEXT);
+	duk_get_prop_stridx_short(ctx, -1, DUK_STRIDX_INT_NEXT);
 	idx = (duk_uint_fast32_t) duk_require_uint(ctx, -1);
 	duk_pop(ctx);
 	DUK_DDD(DUK_DDDPRINT("enumeration: index is: %ld", (long) idx));
@@ -654,7 +655,7 @@ DUK_INTERNAL duk_bool_t duk_hobject_enumerator_next(duk_context *ctx, duk_bool_t
 	 * be the proxy, and checking key existence against the proxy is not
 	 * required (or sensible, as the keys may be fully virtual).
 	 */
-	duk_get_prop_stridx(ctx, -1, DUK_STRIDX_INT_TARGET);
+	duk_get_prop_stridx_short(ctx, -1, DUK_STRIDX_INT_TARGET);
 	enum_target = duk_require_hobject(ctx, -1);
 	DUK_ASSERT(enum_target != NULL);
 #if defined(DUK_USE_ES6_PROXY)
@@ -698,7 +699,7 @@ DUK_INTERNAL duk_bool_t duk_hobject_enumerator_next(duk_context *ctx, duk_bool_t
 	DUK_DDD(DUK_DDDPRINT("enumeration: updating next index to %ld", (long) idx));
 
 	duk_push_u32(ctx, (duk_uint32_t) idx);
-	duk_put_prop_stridx(ctx, -2, DUK_STRIDX_INT_NEXT);
+	duk_put_prop_stridx_short(ctx, -2, DUK_STRIDX_INT_NEXT);
 
 	/* [... enum] */
 
@@ -708,10 +709,10 @@ DUK_INTERNAL duk_bool_t duk_hobject_enumerator_next(duk_context *ctx, duk_bool_t
 			duk_push_hobject(ctx, enum_target);
 			duk_dup_m2(ctx);       /* -> [... enum key enum_target key] */
 			duk_get_prop(ctx, -2); /* -> [... enum key enum_target val] */
-			duk_remove(ctx, -2);   /* -> [... enum key val] */
+			duk_remove_m2(ctx);    /* -> [... enum key val] */
 			duk_remove(ctx, -3);   /* -> [... key val] */
 		} else {
-			duk_remove(ctx, -2);   /* -> [... key] */
+			duk_remove_m2(ctx);    /* -> [... key] */
 		}
 		return 1;
 	} else {
@@ -774,7 +775,7 @@ DUK_INTERNAL duk_ret_t duk_hobject_get_enumerated_keys(duk_context *ctx, duk_sma
 	}
 
 	/* [enum_target enum res] */
-	duk_remove(ctx, -2);
+	duk_remove_m2(ctx);
 
 	/* [enum_target res] */
 

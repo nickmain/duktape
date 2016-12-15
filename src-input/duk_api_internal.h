@@ -3,7 +3,7 @@
  *  to the public API.
  */
 
-#ifndef DUK_API_INTERNAL_H_INCLUDED
+#if !defined(DUK_API_INTERNAL_H_INCLUDED)
 #define DUK_API_INTERNAL_H_INCLUDED
 
 /* duk_push_sprintf constants */
@@ -35,6 +35,11 @@ DUK_INTERNAL_DECL void duk_dup_2(duk_context *ctx);
 DUK_INTERNAL_DECL void duk_dup_m2(duk_context *ctx);
 DUK_INTERNAL_DECL void duk_dup_m3(duk_context *ctx);
 DUK_INTERNAL_DECL void duk_dup_m4(duk_context *ctx);
+
+DUK_INTERNAL_DECL void duk_remove_m2(duk_context *ctx);
+
+DUK_INTERNAL_DECL duk_int_t duk_get_type_tval(duk_tval *tv);
+DUK_INTERNAL_DECL duk_uint_t duk_get_type_mask_tval(duk_tval *tv);
 
 #if defined(DUK_USE_VERBOSE_ERRORS) && defined(DUK_USE_PARANOID_ERRORS)
 DUK_INTERNAL_DECL const char *duk_get_type_name(duk_context *ctx, duk_idx_t idx);
@@ -115,7 +120,13 @@ DUK_INTERNAL_DECL duk_hcompfunc *duk_known_hcompfunc(duk_context *ctx, duk_idx_t
 DUK_INTERNAL_DECL duk_hnatfunc *duk_known_hnatfunc(duk_context *ctx, duk_idx_t idx);
 
 DUK_INTERNAL_DECL duk_hstring *duk_to_hstring(duk_context *ctx, duk_idx_t idx);
+
+DUK_INTERNAL_DECL duk_hstring *duk_to_hstring_m1(duk_context *ctx);
+
 DUK_INTERNAL_DECL duk_hobject *duk_to_hobject(duk_context *ctx, duk_idx_t idx);
+
+DUK_INTERNAL_DECL duk_double_t duk_to_number_m1(duk_context *ctx);
+DUK_INTERNAL_DECL duk_double_t duk_to_number_m2(duk_context *ctx);
 
 #if defined(DUK_USE_DEBUGGER_SUPPORT)  /* only needed by debugger for now */
 DUK_INTERNAL_DECL duk_hstring *duk_safe_to_hstring(duk_context *ctx, duk_idx_t idx);
@@ -139,23 +150,24 @@ DUK_INTERNAL_DECL duk_hnatfunc *duk_require_hnatfunc(duk_context *ctx, duk_idx_t
 DUK_INTERNAL_DECL duk_hobject *duk_require_hobject_with_class(duk_context *ctx, duk_idx_t idx, duk_small_uint_t classnum);
 
 DUK_INTERNAL_DECL void duk_push_hstring(duk_context *ctx, duk_hstring *h);
-DUK_INTERNAL_DECL void duk_push_hstring_stridx(duk_context *ctx, duk_small_int_t stridx);
+DUK_INTERNAL_DECL void duk_push_hstring_stridx(duk_context *ctx, duk_small_uint_t stridx);
+DUK_INTERNAL_DECL void duk_push_hstring_empty(duk_context *ctx);
 DUK_INTERNAL_DECL void duk_push_hobject(duk_context *ctx, duk_hobject *h);
 DUK_INTERNAL_DECL void duk_push_hbuffer(duk_context *ctx, duk_hbuffer *h);
 #define duk_push_hthread(ctx,h) \
 	duk_push_hobject((ctx), (duk_hobject *) (h))
-#define duk_push_hcompfunc(ctx,h) \
-	duk_push_hobject((ctx), (duk_hobject *) (h))
 #define duk_push_hnatfunc(ctx,h) \
 	duk_push_hobject((ctx), (duk_hobject *) (h))
 DUK_INTERNAL_DECL void duk_push_hobject_bidx(duk_context *ctx, duk_small_int_t builtin_idx);
-DUK_INTERNAL_DECL duk_idx_t duk_push_object_helper(duk_context *ctx, duk_uint_t hobject_flags_and_class, duk_small_int_t prototype_bidx);
-DUK_INTERNAL_DECL duk_idx_t duk_push_object_helper_proto(duk_context *ctx, duk_uint_t hobject_flags_and_class, duk_hobject *proto);
-DUK_INTERNAL_DECL duk_idx_t duk_push_object_internal(duk_context *ctx);
-DUK_INTERNAL_DECL duk_idx_t duk_push_compiledfunction(duk_context *ctx);
+DUK_INTERNAL_DECL duk_hobject *duk_push_object_helper(duk_context *ctx, duk_uint_t hobject_flags_and_class, duk_small_int_t prototype_bidx);
+DUK_INTERNAL_DECL duk_hobject *duk_push_object_helper_proto(duk_context *ctx, duk_uint_t hobject_flags_and_class, duk_hobject *proto);
+DUK_INTERNAL_DECL duk_hcompfunc *duk_push_hcompfunc(duk_context *ctx);
 DUK_INTERNAL_DECL void duk_push_c_function_noexotic(duk_context *ctx, duk_c_function func, duk_int_t nargs);
 DUK_INTERNAL_DECL void duk_push_c_function_noconstruct_noexotic(duk_context *ctx, duk_c_function func, duk_int_t nargs);
 
+/* XXX: duk_push_harray() and duk_push_hcompfunc() are inconsistent with
+ * duk_push_hobject() etc which don't create a new value.
+ */
 DUK_INTERNAL_DECL duk_harray *duk_push_harray(duk_context *ctx);
 DUK_INTERNAL_DECL duk_harray *duk_push_harray_with_size(duk_context *ctx, duk_uint32_t size);
 
@@ -174,28 +186,77 @@ DUK_INTERNAL_DECL const char *duk_push_string_readable(duk_context *ctx, duk_idx
 DUK_INTERNAL_DECL const char *duk_push_string_tval_readable(duk_context *ctx, duk_tval *tv);
 DUK_INTERNAL_DECL const char *duk_push_string_tval_readable_error(duk_context *ctx, duk_tval *tv);
 
-DUK_INTERNAL_DECL duk_bool_t duk_get_prop_stridx(duk_context *ctx, duk_idx_t obj_idx, duk_small_int_t stridx);     /* [] -> [val] */
-DUK_INTERNAL_DECL duk_bool_t duk_put_prop_stridx(duk_context *ctx, duk_idx_t obj_idx, duk_small_int_t stridx);     /* [val] -> [] */
-DUK_INTERNAL_DECL duk_bool_t duk_del_prop_stridx(duk_context *ctx, duk_idx_t obj_idx, duk_small_int_t stridx);     /* [] -> [] */
-DUK_INTERNAL_DECL duk_bool_t duk_has_prop_stridx(duk_context *ctx, duk_idx_t obj_idx, duk_small_int_t stridx);     /* [] -> [] */
+/* The duk_xxx_prop_stridx_short() variants expect their arguments to be short
+ * enough to be packed into a single 32-bit integer argument.  Argument limits
+ * vary per call; typically 16 bits are assigned to the signed value stack index
+ * and the stridx.  In practice these work well for footprint with constant
+ * arguments and such call sites are also easiest to verify to be correct.
+ */
 
-DUK_INTERNAL_DECL duk_bool_t duk_get_prop_stridx_boolean(duk_context *ctx, duk_idx_t obj_idx, duk_small_int_t stridx, duk_bool_t *out_has_prop);  /* [] -> [] */
+DUK_INTERNAL_DECL duk_bool_t duk_get_prop_stridx(duk_context *ctx, duk_idx_t obj_idx, duk_small_uint_t stridx);     /* [] -> [val] */
+DUK_INTERNAL_DECL duk_bool_t duk_get_prop_stridx_short_raw(duk_context *ctx, duk_uint_t packed_args);
+#define duk_get_prop_stridx_short(ctx,obj_idx,stridx) \
+	(DUK_ASSERT_EXPR((obj_idx) >= -0x8000L && (obj_idx) <= 0x7fffL), \
+	 DUK_ASSERT_EXPR((stridx) >= 0 && (stridx) <= 0xffffL), \
+	 duk_get_prop_stridx_short_raw((ctx), (((duk_uint_t) (obj_idx)) << 16) + ((duk_uint_t) (stridx))))
+DUK_INTERNAL_DECL duk_bool_t duk_get_prop_stridx_boolean(duk_context *ctx, duk_idx_t obj_idx, duk_small_uint_t stridx, duk_bool_t *out_has_prop);  /* [] -> [] */
+
+DUK_INTERNAL_DECL duk_bool_t duk_put_prop_stridx(duk_context *ctx, duk_idx_t obj_idx, duk_small_uint_t stridx);     /* [val] -> [] */
+DUK_INTERNAL_DECL duk_bool_t duk_put_prop_stridx_short_raw(duk_context *ctx, duk_uint_t packed_args);
+#define duk_put_prop_stridx_short(ctx,obj_idx,stridx) \
+	(DUK_ASSERT_EXPR((obj_idx) >= -0x8000L && (obj_idx) <= 0x7fffL), \
+	 DUK_ASSERT_EXPR((stridx) >= 0 && (stridx) <= 0xffffL), \
+	 duk_put_prop_stridx_short_raw((ctx), (((duk_uint_t) (obj_idx)) << 16) + ((duk_uint_t) (stridx))))
+
+DUK_INTERNAL_DECL duk_bool_t duk_del_prop_stridx(duk_context *ctx, duk_idx_t obj_idx, duk_small_uint_t stridx);     /* [] -> [] */
+#if 0  /* Too few call sites to be useful. */
+DUK_INTERNAL_DECL duk_bool_t duk_del_prop_stridx_short_raw(duk_context *ctx, duk_uint_t packed_args);
+#define duk_del_prop_stridx_short(ctx,obj_idx,stridx) \
+	(DUK_ASSERT_EXPR((obj_idx) >= -0x8000L && (obj_idx) <= 0x7fffL), \
+	 DUK_ASSERT_EXPR((stridx) >= 0 && (stridx) <= 0xffffL), \
+	 duk_del_prop_stridx_short_raw((ctx), (((duk_uint_t) (obj_idx)) << 16) + ((duk_uint_t) (stridx))))
+#endif
+#define duk_del_prop_stridx_short(ctx,obj_idx,stridx) \
+	duk_del_prop_stridx((ctx), (obj_idx), (stridx))
+
+DUK_INTERNAL_DECL duk_bool_t duk_has_prop_stridx(duk_context *ctx, duk_idx_t obj_idx, duk_small_uint_t stridx);     /* [] -> [] */
+#if 0  /* Too few call sites to be useful. */
+DUK_INTERNAL_DECL duk_bool_t duk_has_prop_stridx_short_raw(duk_context *ctx, duk_uint_t packed_args);
+#define duk_has_prop_stridx_short(ctx,obj_idx,stridx) \
+	(DUK_ASSERT_EXPR((obj_idx) >= -0x8000L && (obj_idx) <= 0x7fffL), \
+	 DUK_ASSERT_EXPR((stridx) >= 0 && (stridx) <= 0xffffL), \
+	 duk_has_prop_stridx_short_raw((ctx), (((duk_uint_t) (obj_idx)) << 16) + ((duk_uint_t) (stridx))))
+#endif
+#define duk_has_prop_stridx_short(ctx,obj_idx,stridx) \
+	duk_has_prop_stridx((ctx), (obj_idx), (stridx))
 
 DUK_INTERNAL_DECL void duk_xdef_prop(duk_context *ctx, duk_idx_t obj_idx, duk_small_uint_t desc_flags);  /* [key val] -> [] */
-DUK_INTERNAL_DECL void duk_xdef_prop_index(duk_context *ctx, duk_idx_t obj_idx, duk_uarridx_t arr_idx, duk_small_uint_t desc_flags);  /* [val] -> [] */
-DUK_INTERNAL_DECL void duk_xdef_prop_stridx(duk_context *ctx, duk_idx_t obj_idx, duk_small_int_t stridx, duk_small_uint_t desc_flags);  /* [val] -> [] */
-DUK_INTERNAL_DECL void duk_xdef_prop_stridx_builtin(duk_context *ctx, duk_idx_t obj_idx, duk_small_int_t stridx, duk_small_int_t builtin_idx, duk_small_uint_t desc_flags);  /* [] -> [] */
-DUK_INTERNAL_DECL void duk_xdef_prop_stridx_thrower(duk_context *ctx, duk_idx_t obj_idx, duk_small_int_t stridx);  /* [] -> [] */
 
-/* These are macros for now, but could be separate functions to reduce code
- * footprint (check call site count before refactoring).
+DUK_INTERNAL_DECL void duk_xdef_prop_index(duk_context *ctx, duk_idx_t obj_idx, duk_uarridx_t arr_idx, duk_small_uint_t desc_flags);  /* [val] -> [] */
+
+/* XXX: Because stridx and desc_flags have a limited range, this call could
+ * always pack stridx and desc_flags into a single argument.
  */
+DUK_INTERNAL_DECL void duk_xdef_prop_stridx(duk_context *ctx, duk_idx_t obj_idx, duk_small_uint_t stridx, duk_small_uint_t desc_flags);  /* [val] -> [] */
+DUK_INTERNAL_DECL void duk_xdef_prop_stridx_short_raw(duk_context *ctx, duk_uint_t packed_args);
+#define duk_xdef_prop_stridx_short(ctx,obj_idx,stridx,desc_flags) \
+	(DUK_ASSERT_EXPR((obj_idx) >= -0x80L && (obj_idx) <= 0x7fL), \
+	 DUK_ASSERT_EXPR((stridx) >= 0 && (stridx) <= 0xffffL), \
+	 DUK_ASSERT_EXPR((desc_flags) >= 0 && (desc_flags) <= 0xffL), \
+	 duk_xdef_prop_stridx_short_raw((ctx), (((duk_uint_t) (obj_idx)) << 24) + (((duk_uint_t) (stridx)) << 8) + (duk_uint_t) (desc_flags)))
+
 #define duk_xdef_prop_wec(ctx,obj_idx) \
 	duk_xdef_prop((ctx), (obj_idx), DUK_PROPDESC_FLAGS_WEC)
 #define duk_xdef_prop_index_wec(ctx,obj_idx,arr_idx) \
 	duk_xdef_prop_index((ctx), (obj_idx), (arr_idx), DUK_PROPDESC_FLAGS_WEC)
 #define duk_xdef_prop_stridx_wec(ctx,obj_idx,stridx) \
 	duk_xdef_prop_stridx((ctx), (obj_idx), (stridx), DUK_PROPDESC_FLAGS_WEC)
+#define duk_xdef_prop_stridx_short_wec(ctx,obj_idx,stridx) \
+	duk_xdef_prop_stridx_short((ctx), (obj_idx), (stridx), DUK_PROPDESC_FLAGS_WEC)
+
+DUK_INTERNAL_DECL void duk_xdef_prop_stridx_builtin(duk_context *ctx, duk_idx_t obj_idx, duk_small_uint_t stridx, duk_small_int_t builtin_idx, duk_small_uint_t desc_flags);  /* [] -> [] */
+
+DUK_INTERNAL_DECL void duk_xdef_prop_stridx_thrower(duk_context *ctx, duk_idx_t obj_idx, duk_small_uint_t stridx);  /* [] -> [] */
 
 /* Set object 'length'. */
 DUK_INTERNAL_DECL void duk_set_length(duk_context *ctx, duk_idx_t idx, duk_size_t length);
@@ -209,15 +270,23 @@ DUK_INTERNAL_DECL void duk_require_constructor_call(duk_context *ctx);
 
 DUK_INTERNAL_DECL void duk_require_constructable(duk_context *ctx, duk_idx_t idx);
 
+DUK_INTERNAL_DECL void duk_resolve_nonbound_function(duk_context *ctx);
+
+DUK_INTERNAL_DECL duk_idx_t duk_get_top_require_min(duk_context *ctx, duk_idx_t min_top);
+DUK_INTERNAL_DECL duk_idx_t duk_get_top_index_unsafe(duk_context *ctx);
+DUK_INTERNAL_DECL void duk_pop_unsafe(duk_context *ctx);
+
+DUK_INTERNAL_DECL void duk_compact_m1(duk_context *ctx);
+
 /* Raw internal valstack access macros: access is unsafe so call site
  * must have a guarantee that the index is valid.  When that is the case,
  * using these macro results in faster and smaller code than duk_get_tval().
  * Both 'ctx' and 'idx' are evaluted multiple times, but only for asserts.
  */
 #define DUK_ASSERT_VALID_NEGIDX(ctx,idx) \
-	(DUK_ASSERT_EXPR((idx) < 0), DUK_ASSERT_EXPR(duk_is_valid_index((ctx), (idx))))
+	(DUK_ASSERT_EXPR((duk_int_t) (idx) < 0), DUK_ASSERT_EXPR(duk_is_valid_index((ctx), (idx))))
 #define DUK_ASSERT_VALID_POSIDX(ctx,idx) \
-	(DUK_ASSERT_EXPR((idx) >= 0), DUK_ASSERT_EXPR(duk_is_valid_index((ctx), (idx))))
+	(DUK_ASSERT_EXPR((duk_int_t) (idx) >= 0), DUK_ASSERT_EXPR(duk_is_valid_index((ctx), (idx))))
 #define DUK_GET_TVAL_NEGIDX(ctx,idx) \
 	(DUK_ASSERT_VALID_NEGIDX((ctx),(idx)), ((duk_hthread *) (ctx))->valstack_top + (idx))
 #define DUK_GET_TVAL_POSIDX(ctx,idx) \

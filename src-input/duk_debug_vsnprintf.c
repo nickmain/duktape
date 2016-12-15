@@ -52,7 +52,7 @@
 
 #include "duk_internal.h"
 
-#ifdef DUK_USE_DEBUG
+#if defined(DUK_USE_DEBUG)
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -167,7 +167,7 @@ DUK_LOCAL void duk__print_shared_heaphdr(duk__dprint_state *st, duk_heaphdr *h) 
 		duk_fb_put_byte(fb, (duk_uint8_t) DUK_ASC_RBRACKET);
 	}
 
-#ifdef DUK_USE_REFERENCE_COUNTING  /* currently implicitly also DUK_USE_DOUBLE_LINKED_HEAP */
+#if defined(DUK_USE_REFERENCE_COUNTING)  /* currently implicitly also DUK_USE_DOUBLE_LINKED_HEAP */
 	if (st->heavy) {
 		duk_fb_sprintf(fb, "[h_next=%p,h_prev=%p,h_refcount=%lu,h_flags=%08lx,type=%ld,"
 		               "reachable=%ld,temproot=%ld,finalizable=%ld,finalized=%ld]",
@@ -215,7 +215,7 @@ DUK_LOCAL void duk__print_shared_heaphdr_string(duk__dprint_state *st, duk_heaph
 		duk_fb_put_byte(fb, (duk_uint8_t) DUK_ASC_RBRACKET);
 	}
 
-#ifdef DUK_USE_REFERENCE_COUNTING
+#if defined(DUK_USE_REFERENCE_COUNTING)
 	if (st->heavy) {
 		duk_fb_sprintf(fb, "[h_refcount=%lu,h_flags=%08lx,type=%ld,reachable=%ld,temproot=%ld,finalizable=%ld,finalized=%ld]",
 		               (unsigned long) DUK_HEAPHDR_GET_REFCOUNT((duk_heaphdr *) h),
@@ -293,7 +293,7 @@ DUK_LOCAL void duk__print_hstring(duk__dprint_state *st, duk_hstring *h, duk_boo
 	if (quotes) {
 		duk_fb_put_byte(fb, (duk_uint8_t) DUK_ASC_DOUBLEQUOTE);
 	}
-#ifdef DUK_USE_REFERENCE_COUNTING
+#if defined(DUK_USE_REFERENCE_COUNTING)
 	/* XXX: limit to quoted strings only, to save keys from being cluttered? */
 	duk_fb_sprintf(fb, "/%lu", (unsigned long) DUK_HEAPHDR_GET_REFCOUNT(&h->hdr));
 #endif
@@ -344,9 +344,8 @@ DUK_LOCAL void duk__print_hobject(duk__dprint_state *st, duk_hobject *h) {
 			subtype = "thread";
 		} else if (DUK_HOBJECT_IS_BUFOBJ(h)) {
 			subtype = "bufobj";
-			/* XXX: add duk_harray here */
-		} else {
-			duk_fb_sprintf(fb, "%sobject %p%s", (const char *) brace1, (void *) h, (const char *) brace2);  /* may be NULL */
+		} else if (DUK_HOBJECT_IS_ARRAY(h)) {
+			subtype = "array";
 		}
 		duk_fb_sprintf(fb, "%sobject/%s %p%s", (const char *) brace1, subtype, (void *) h, (const char *) brace2);
 		return;
@@ -456,6 +455,9 @@ DUK_LOCAL void duk__print_hobject(duk__dprint_state *st, duk_hobject *h) {
 		if (DUK_HOBJECT_HAS_STRICT(h)) {
 			DUK__COMMA(); duk_fb_sprintf(fb, "__strict:true");
 		}
+		if (DUK_HOBJECT_HAS_NOTAIL(h)) {
+			DUK__COMMA(); duk_fb_sprintf(fb, "__notail:true");
+		}
 		if (DUK_HOBJECT_HAS_NEWENV(h)) {
 			DUK__COMMA(); duk_fb_sprintf(fb, "__newenv:true");
 		}
@@ -496,6 +498,8 @@ DUK_LOCAL void duk__print_hobject(duk__dprint_state *st, duk_hobject *h) {
 		duk_hcompfunc *f = (duk_hcompfunc *) h;
 		DUK__COMMA(); duk_fb_put_cstring(fb, "__data:");
 		duk__print_hbuffer(st, (duk_hbuffer *) DUK_HCOMPFUNC_GET_DATA(NULL, f));
+		DUK__COMMA(); duk_fb_put_cstring(fb, "__lexenv:"); duk__print_hobject(st, DUK_HCOMPFUNC_GET_LEXENV(NULL, f));
+		DUK__COMMA(); duk_fb_put_cstring(fb, "__varenv:"); duk__print_hobject(st, DUK_HCOMPFUNC_GET_VARENV(NULL, f));
 		DUK__COMMA(); duk_fb_sprintf(fb, "__nregs:%ld", (long) f->nregs);
 		DUK__COMMA(); duk_fb_sprintf(fb, "__nargs:%ld", (long) f->nargs);
 #if defined(DUK_USE_DEBUGGER_SUPPORT)
@@ -540,7 +544,7 @@ DUK_LOCAL void duk__print_hobject(duk__dprint_state *st, duk_hobject *h) {
 		/* XXX: print built-ins array? */
 
 	}
-#ifdef DUK_USE_REFERENCE_COUNTING
+#if defined(DUK_USE_REFERENCE_COUNTING)
 	if (st->internal) {
 		DUK__COMMA(); duk_fb_sprintf(fb, "__refcount:%lu", (unsigned long) DUK_HEAPHDR_GET_REFCOUNT((duk_heaphdr *) h));
 	}
@@ -622,7 +626,7 @@ DUK_LOCAL void duk__print_hbuffer(duk__dprint_state *st, duk_hbuffer *h) {
 		duk_fb_sprintf(fb, "buffer:fixed:%ld", (long) DUK_HBUFFER_GET_SIZE(h));
 	}
 
-#ifdef DUK_USE_REFERENCE_COUNTING
+#if defined(DUK_USE_REFERENCE_COUNTING)
 	duk_fb_sprintf(fb, "/%lu", (unsigned long) DUK_HEAPHDR_GET_REFCOUNT(&h->hdr));
 #endif
 
@@ -1004,7 +1008,7 @@ DUK_INTERNAL void duk_debug_format_funcptr(char *buf, duk_size_t buf_size, duk_u
 		}
 
 		/* Quite approximate but should be useful for little and big endian. */
-#ifdef DUK_USE_INTEGER_BE
+#if defined(DUK_USE_INTEGER_BE)
 		ch = fptr[i];
 #else
 		ch = fptr[fptr_size - 1 - i];

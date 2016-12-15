@@ -101,13 +101,6 @@
 #define DUK_MEMZERO(p,n) DUK_MEMSET((p), 0, (n))
 #endif
 
-#if !defined(DUK_DOUBLE_2TO32)
-#define DUK_DOUBLE_2TO32     4294967296.0
-#endif
-#if !defined(DUK_DOUBLE_2TO31)
-#define DUK_DOUBLE_2TO31     2147483648.0
-#endif
-
 #if !defined(DUK_DOUBLE_INFINITY)
 #undef DUK_USE_COMPUTED_INFINITY
 #if defined(DUK_F_GCC_VERSION) && (DUK_F_GCC_VERSION < 40600)
@@ -215,41 +208,12 @@
 #undef DUK_F_USE_REPL_ALL
 #endif
 
-/* Some math functions are C99 only.  This is also an issue with some
- * embedded environments using uclibc where uclibc has been configured
- * not to provide some functions.  For now, use replacements whenever
- * using uclibc.
- */
-#undef DUK_USE_MATH_FMIN
-#undef DUK_USE_MATH_FMAX
-#undef DUK_USE_MATH_ROUND
-#if defined(DUK_F_UCLIBC)
-/* uclibc may be missing these */
-#elif defined(DUK_F_AMIGAOS) && defined(DUK_F_VBCC)
-/* vbcc + AmigaOS may be missing these */
-#elif defined(DUK_F_MINT)
-/* mint clib is missing these */
-#elif !defined(DUK_F_C99) && !defined(DUK_F_CPP11)
-/* build is not C99 or C++11, play it safe */
-#else
-/* C99 or C++11, no known issues */
-#define DUK_USE_MATH_FMIN
-#define DUK_USE_MATH_FMAX
-#define DUK_USE_MATH_ROUND
-#endif
-
 /* These functions don't currently need replacement but are wrapped for
  * completeness.  Because these are used as function pointers, they need
  * to be defined as concrete C functions (not macros).
  */
 #if !defined(DUK_FABS)
 #define DUK_FABS             fabs
-#endif
-#if !defined(DUK_FMIN)
-#define DUK_FMIN             fmin
-#endif
-#if !defined(DUK_FMAX)
-#define DUK_FMAX             fmax
 #endif
 #if !defined(DUK_FLOOR)
 #define DUK_FLOOR            floor
@@ -294,13 +258,42 @@
 #define DUK_SQRT             sqrt
 #endif
 
-/* NetBSD 6.0 x86 (at least) has a few problems with pow() semantics,
- * see test-bug-netbsd-math-pow.js.  Use NetBSD specific workaround.
- * (This might be a wider problem; if so, generalize the define name.)
+/* The functions below exist only in C99/C++11 or later and need a workaround
+ * for platforms that don't include them.  MSVC isn't detected as C99, but
+ * these functions also exist in MSVC 2013 and later so include a clause for
+ * that too.
  */
-#undef DUK_USE_POW_NETBSD_WORKAROUND
-#if defined(DUK_F_NETBSD)
-#define DUK_USE_POW_NETBSD_WORKAROUND
+#if defined(DUK_F_C99) || defined(DUK_F_CPP11) || (defined(_MSC_VER) && (_MSC_VER >= 1800))
+#if !defined(DUK_CBRT)
+#define DUK_CBRT             cbrt
+#endif
+#if !defined(DUK_LOG2)
+#define DUK_LOG2             log2
+#endif
+#if !defined(DUK_LOG10)
+#define DUK_LOG10            log10
+#endif
+#if !defined(DUK_TRUNC)
+#define DUK_TRUNC            trunc
+#endif
+#endif  /* DUK_F_C99 */
+
+/* NetBSD 6.0 x86 (at least) has a few problems with pow() semantics,
+ * see test-bug-netbsd-math-pow.js.  MinGW has similar (but different)
+ * issues, see test-bug-mingw-math-issues.js.  Enable pow() workarounds
+ * for these targets.
+ */
+#undef DUK_USE_POW_WORKAROUNDS
+#if defined(DUK_F_NETBSD) || defined(DUK_F_MINGW)
+#define DUK_USE_POW_WORKAROUNDS
+#endif
+
+/* Similar workarounds for atan2() semantics issues.  MinGW issues are
+ * documented in test-bug-mingw-math-issues.js.
+ */
+#undef DUK_USE_ATAN2_WORKAROUNDS
+#if defined(DUK_F_MINGW)
+#define DUK_USE_ATAN2_WORKAROUNDS
 #endif
 
 /* Rely as little as possible on compiler behavior for NaN comparison,

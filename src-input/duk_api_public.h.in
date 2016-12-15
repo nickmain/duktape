@@ -105,10 +105,10 @@ struct duk_time_components {
  */
 
 /* Duktape version, (major * 10000) + (minor * 100) + patch.  Allows C code
- * to #ifdef against Duktape API version.  The same value is also available
- * to Ecmascript code in Duktape.version.  Unofficial development snapshots
- * have 99 for patch level (e.g. 0.10.99 would be a development version
- * after 0.10.0 but before the next official release).
+ * to #if (DUK_VERSION >= NNN) against Duktape API version.  The same value
+ * is also available to Ecmascript code in Duktape.version.  Unofficial
+ * development snapshots have 99 for patch level (e.g. 0.10.99 would be a
+ * development version after 0.10.0 but before the next official release).
  */
 #define DUK_VERSION                       19999L
 
@@ -216,6 +216,9 @@ struct duk_time_components {
 /* Flags for duk_push_thread_raw() */
 #define DUK_THREAD_NEW_GLOBAL_ENV         (1 << 0)    /* create a new global environment */
 
+/* Flags for duk_gc() */
+#define DUK_GC_COMPACT                    (1 << 0)    /* compact heap objects */
+
 /* Error codes (must be 8 bits at most, see duk_error.h) */
 #define DUK_ERR_NONE                      0    /* no error (e.g. from duk_get_error_code()) */
 #define DUK_ERR_ERROR                     1    /* Error */
@@ -249,7 +252,7 @@ struct duk_time_components {
  *  which is ugly and not thread safe.
  */
 
-#ifndef DUK_API_VARIADIC_MACROS
+#if !defined(DUK_API_VARIADIC_MACROS)
 DUK_EXTERNAL_DECL const char *duk_api_global_filename;
 DUK_EXTERNAL_DECL duk_int_t duk_api_global_line;
 #endif
@@ -470,6 +473,7 @@ DUK_EXTERNAL_DECL void duk_push_global_stash(duk_context *ctx);
 DUK_EXTERNAL_DECL void duk_push_thread_stash(duk_context *ctx, duk_context *target_ctx);
 
 DUK_EXTERNAL_DECL duk_idx_t duk_push_object(duk_context *ctx);
+DUK_EXTERNAL_DECL duk_idx_t duk_push_bare_object(duk_context *ctx);
 DUK_EXTERNAL_DECL duk_idx_t duk_push_array(duk_context *ctx);
 DUK_EXTERNAL_DECL duk_idx_t duk_push_c_function(duk_context *ctx, duk_c_function func, duk_idx_t nargs);
 DUK_EXTERNAL_DECL duk_idx_t duk_push_c_lightfunc(duk_context *ctx, duk_c_function func, duk_idx_t nargs, duk_idx_t length, duk_int_t magic);
@@ -759,12 +763,21 @@ DUK_EXTERNAL_DECL duk_bool_t duk_has_prop(duk_context *ctx, duk_idx_t obj_idx);
 DUK_EXTERNAL_DECL duk_bool_t duk_has_prop_string(duk_context *ctx, duk_idx_t obj_idx, const char *key);
 DUK_EXTERNAL_DECL duk_bool_t duk_has_prop_lstring(duk_context *ctx, duk_idx_t obj_idx, const char *key, duk_size_t key_len);
 DUK_EXTERNAL_DECL duk_bool_t duk_has_prop_index(duk_context *ctx, duk_idx_t obj_idx, duk_uarridx_t arr_idx);
+
+DUK_EXTERNAL_DECL void duk_get_prop_desc(duk_context *ctx, duk_idx_t obj_idx, duk_uint_t flags);
 DUK_EXTERNAL_DECL void duk_def_prop(duk_context *ctx, duk_idx_t obj_idx, duk_uint_t flags);
 
 DUK_EXTERNAL_DECL duk_bool_t duk_get_global_string(duk_context *ctx, const char *key);
 DUK_EXTERNAL_DECL duk_bool_t duk_get_global_lstring(duk_context *ctx, const char *key, duk_size_t key_len);
 DUK_EXTERNAL_DECL duk_bool_t duk_put_global_string(duk_context *ctx, const char *key);
 DUK_EXTERNAL_DECL duk_bool_t duk_put_global_lstring(duk_context *ctx, const char *key, duk_size_t key_len);
+
+/*
+ *  Inspection
+ */
+
+DUK_EXTERNAL_DECL void duk_inspect_value(duk_context *ctx, duk_idx_t idx);
+DUK_EXTERNAL_DECL void duk_inspect_callstack_entry(duk_context *ctx, duk_int_t level);
 
 /*
  *  Object prototype
@@ -827,6 +840,7 @@ DUK_EXTERNAL_DECL duk_codepoint_t duk_char_code_at(duk_context *ctx, duk_idx_t i
 
 DUK_EXTERNAL_DECL duk_bool_t duk_equals(duk_context *ctx, duk_idx_t idx1, duk_idx_t idx2);
 DUK_EXTERNAL_DECL duk_bool_t duk_strict_equals(duk_context *ctx, duk_idx_t idx1, duk_idx_t idx2);
+DUK_EXTERNAL_DECL duk_bool_t duk_samevalue(duk_context *ctx, duk_idx_t idx1, duk_idx_t idx2);
 DUK_EXTERNAL_DECL duk_bool_t duk_instanceof(duk_context *ctx, duk_idx_t idx1, duk_idx_t idx2);
 
 /*

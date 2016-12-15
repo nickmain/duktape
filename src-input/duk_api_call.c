@@ -322,8 +322,8 @@ DUK_EXTERNAL void duk_new(duk_context *ctx, duk_idx_t nargs) {
 			/* Anything else is not constructable. */
 			goto not_constructable;
 		}
-		duk_get_prop_stridx(ctx, -1, DUK_STRIDX_INT_TARGET);  /* -> [... cons target] */
-		duk_remove(ctx, -2);                                  /* -> [... target] */
+		duk_get_prop_stridx_short(ctx, -1, DUK_STRIDX_INT_TARGET);  /* -> [... cons target] */
+		duk_remove_m2(ctx);                                         /* -> [... target] */
 	}
 	DUK_ASSERT(duk_is_callable(ctx, -1));
 	DUK_ASSERT(duk_is_lightfunc(ctx, -1) ||
@@ -342,7 +342,7 @@ DUK_EXTERNAL void duk_new(duk_context *ctx, duk_idx_t nargs) {
 
 	/* [... constructor arg1 ... argN final_cons fallback] */
 
-	duk_get_prop_stridx(ctx, -2, DUK_STRIDX_PROTOTYPE);
+	duk_get_prop_stridx_short(ctx, -2, DUK_STRIDX_PROTOTYPE);
 	proto = duk_get_hobject(ctx, -1);
 	if (!proto) {
 		DUK_DDD(DUK_DDDPRINT("constructor has no 'prototype' property, or value not an object "
@@ -403,7 +403,7 @@ DUK_EXTERNAL void duk_new(duk_context *ctx, duk_idx_t nargs) {
 	 */
 
 	if (duk_is_object(ctx, -1)) {
-		duk_remove(ctx, -2);
+		duk_remove_m2(ctx);
 	} else {
 		duk_pop(ctx);
 	}
@@ -414,7 +414,7 @@ DUK_EXTERNAL void duk_new(duk_context *ctx, duk_idx_t nargs) {
 	 *  stack reflects the caller which is correct.
 	 */
 
-#ifdef DUK_USE_AUGMENT_ERROR_CREATE
+#if defined(DUK_USE_AUGMENT_ERROR_CREATE)
 	duk_hthread_sync_currpc(thr);
 	duk_err_augment_error_create(thr, thr, NULL, 0, 1 /*noblame_fileline*/);
 #endif
@@ -575,4 +575,34 @@ DUK_EXTERNAL void duk_set_magic(duk_context *ctx, duk_idx_t idx, duk_int_t magic
 	nf = duk_require_hnatfunc(ctx, idx);
 	DUK_ASSERT(nf != NULL);
 	nf->magic = (duk_int16_t) magic;
+}
+
+/*
+ *  Misc helpers
+ */
+
+DUK_INTERNAL void duk_resolve_nonbound_function(duk_context *ctx) {
+	duk_uint_t sanity;
+	duk_tval *tv;
+
+	sanity = DUK_HOBJECT_BOUND_CHAIN_SANITY;
+	do {
+		tv = DUK_GET_TVAL_NEGIDX(ctx, -1);
+		if (DUK_TVAL_IS_LIGHTFUNC(tv)) {
+			/* Lightweight function: never bound, so terminate. */
+			break;
+		} else if (DUK_TVAL_IS_OBJECT(tv)) {
+			duk_hobject *func;
+
+			func = DUK_TVAL_GET_OBJECT(tv);
+			DUK_ASSERT(func != NULL);
+			if (!DUK_HOBJECT_IS_CALLABLE(func) || !DUK_HOBJECT_HAS_BOUNDFUNC(func)) {
+				break;
+			}
+			duk_get_prop_stridx_short(ctx, -1, DUK_STRIDX_INT_TARGET);
+			duk_replace(ctx, -2);
+		} else {
+			break;
+		}
+	} while (--sanity > 0);
 }

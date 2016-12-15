@@ -21,7 +21,7 @@ DUK_INTERNAL duk_ret_t duk_bi_error_constructor_shared(duk_context *ctx) {
 
 	DUK_UNREF(thr);
 
-	duk_push_object_helper(ctx, flags_and_class, bidx_prototype);
+	(void) duk_push_object_helper(ctx, flags_and_class, bidx_prototype);
 
 	/* If message is undefined, the own property 'message' is not set at
 	 * all to save property space.  An empty message is inherited anyway.
@@ -29,14 +29,14 @@ DUK_INTERNAL duk_ret_t duk_bi_error_constructor_shared(duk_context *ctx) {
 	if (!duk_is_undefined(ctx, 0)) {
 		duk_to_string(ctx, 0);
 		duk_dup_0(ctx);  /* [ message error message ] */
-		duk_xdef_prop_stridx(ctx, -2, DUK_STRIDX_MESSAGE, DUK_PROPDESC_FLAGS_WC);
+		duk_xdef_prop_stridx_short(ctx, -2, DUK_STRIDX_MESSAGE, DUK_PROPDESC_FLAGS_WC);
 	}
 
 	/* Augment the error if called as a normal function.  __FILE__ and __LINE__
 	 * are not desirable in this case.
 	 */
 
-#ifdef DUK_USE_AUGMENT_ERROR_CREATE
+#if defined(DUK_USE_AUGMENT_ERROR_CREATE)
 	if (!duk_is_constructor_call(ctx)) {
 		duk_err_augment_error_create(thr, thr, NULL, 0, 1 /*noblame_fileline*/);
 	}
@@ -53,7 +53,7 @@ DUK_INTERNAL duk_ret_t duk_bi_error_prototype_to_string(duk_context *ctx) {
 
 	/* [ ... this ] */
 
-	duk_get_prop_stridx(ctx, -1, DUK_STRIDX_NAME);
+	duk_get_prop_stridx_short(ctx, -1, DUK_STRIDX_NAME);
 	if (duk_is_undefined(ctx, -1)) {
 		duk_pop(ctx);
 		duk_push_string(ctx, "Error");
@@ -67,7 +67,7 @@ DUK_INTERNAL duk_ret_t duk_bi_error_prototype_to_string(duk_context *ctx) {
 	 * accident or are they actually needed?  The first ToString()
 	 * could conceivably return 'undefined'.
 	 */
-	duk_get_prop_stridx(ctx, -2, DUK_STRIDX_MESSAGE);
+	duk_get_prop_stridx_short(ctx, -2, DUK_STRIDX_MESSAGE);
 	if (duk_is_undefined(ctx, -1)) {
 		duk_pop(ctx);
 		duk_push_string(ctx, "");
@@ -131,7 +131,7 @@ DUK_LOCAL duk_ret_t duk__error_getter_helper(duk_context *ctx, duk_small_int_t o
 	DUK_UNREF(thr);
 
 	duk_push_this(ctx);
-	duk_get_prop_stridx(ctx, -1, DUK_STRIDX_INT_TRACEDATA);
+	duk_get_prop_stridx_short(ctx, -1, DUK_STRIDX_INT_TRACEDATA);
 	idx_td = duk_get_top_index(ctx);
 
 	duk_push_hstring_stridx(ctx, DUK_STRIDX_NEWLINE_4SPACE);
@@ -156,7 +156,7 @@ DUK_LOCAL duk_ret_t duk__error_getter_helper(duk_context *ctx, duk_small_int_t o
 			duk_require_stack(ctx, 5);
 			duk_get_prop_index(ctx, idx_td, i);
 			duk_get_prop_index(ctx, idx_td, i + 1);
-			d = duk_to_number(ctx, -1);
+			d = duk_to_number_m1(ctx);
 			pc = (duk_int_t) DUK_FMOD(d, DUK_DOUBLE_2TO32);
 			flags = (duk_int_t) DUK_FLOOR(d / DUK_DOUBLE_2TO32);
 			t = (duk_small_int_t) duk_get_type(ctx, -2);
@@ -172,8 +172,12 @@ DUK_LOCAL duk_ret_t duk__error_getter_helper(duk_context *ctx, duk_small_int_t o
 
 				h_func = duk_get_hobject(ctx, -2);  /* NULL for lightfunc */
 
-				duk_get_prop_stridx(ctx, -2, DUK_STRIDX_NAME);
-				duk_get_prop_stridx(ctx, -3, DUK_STRIDX_FILE_NAME);
+				/* These may be systematically omitted by Duktape
+				 * with certain config options, but allow user to
+				 * set them on a case-by-case basis.
+				 */
+				duk_get_prop_stridx_short(ctx, -2, DUK_STRIDX_NAME);
+				duk_get_prop_stridx_short(ctx, -3, DUK_STRIDX_FILE_NAME);
 
 #if defined(DUK_USE_PC2LINE)
 				line = duk_hobject_pc2line_query(ctx, -4, (duk_uint_fast32_t) pc);
@@ -234,7 +238,7 @@ DUK_LOCAL duk_ret_t duk__error_getter_helper(duk_context *ctx, duk_small_int_t o
 					                 (const char *) ((flags & DUK_ACT_FLAG_PREVENT_YIELD) ? str_prevyield : str_empty));
 				}
 				duk_replace(ctx, -5);   /* [ ... v1 v2 name filename str ] -> [ ... str v2 name filename ] */
-				duk_pop_n(ctx, 3);      /* -> [ ... str ] */
+				duk_pop_3(ctx);         /* -> [ ... str ] */
 			} else if (t == DUK_TYPE_STRING) {
 				/*
 				 *  __FILE__ / __LINE__ entry, here 'pc' is line number directly.

@@ -3,7 +3,7 @@
  *  header declarations emitted by genbuiltins.py.
  */
 
-#ifndef DUK_BUILTIN_PROTOS_H_INCLUDED
+#if !defined(DUK_BUILTIN_PROTOS_H_INCLUDED)
 #define DUK_BUILTIN_PROTOS_H_INCLUDED
 
 /* Buffer size needed for ISO 8601 formatting.
@@ -31,7 +31,7 @@ DUK_INTERNAL_DECL duk_double_t duk_bi_date_get_now_time(duk_context *ctx);
 #if defined(DUK_USE_DATE_NOW_WINDOWS)
 DUK_INTERNAL_DECL duk_double_t duk_bi_date_get_now_windows(duk_context *ctx);
 #endif
-#if defined(DUK_USE_DATE_TZO_GMTIME_R) || defined(DUK_USE_DATE_TZO_GMTIME)
+#if defined(DUK_USE_DATE_TZO_GMTIME_R) || defined(DUK_USE_DATE_TZO_GMTIME_S) || defined(DUK_USE_DATE_TZO_GMTIME)
 DUK_INTERNAL_DECL duk_int_t duk_bi_date_get_local_tzoffset_gmtime(duk_double_t d);
 #endif
 #if defined(DUK_USE_DATE_TZO_WINDOWS)
@@ -60,5 +60,9 @@ void duk_bi_json_stringify_helper(duk_context *ctx,
                                   duk_small_uint_t flags);
 
 DUK_INTERNAL_DECL duk_ret_t duk_textdecoder_decode_utf8_nodejs(duk_context *ctx);
+
+#if defined(DUK_USE_ES6_PROXY)
+DUK_INTERNAL_DECL void duk_proxy_ownkeys_postprocess(duk_context *ctx, duk_hobject *h_proxy_target, duk_bool_t enumerable_only);
+#endif
 
 #endif  /* DUK_BUILTIN_PROTOS_H_INCLUDED */

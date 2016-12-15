@@ -20,7 +20,7 @@
 
 #include "duk_internal.h"
 
-#ifdef DUK_USE_REGEXP_SUPPORT
+#if defined(DUK_USE_REGEXP_SUPPORT)
 
 /*
  *  Helper macros
@@ -931,8 +931,7 @@ DUK_LOCAL void duk__create_escaped_source(duk_hthread *thr, int idx_pattern) {
 	n = (duk_size_t) DUK_HSTRING_GET_BYTELEN(h);
 
 	if (n == 0) {
-		/* return '(?:)' */
-		duk_push_hstring_stridx(ctx, DUK_STRIDX_ESCAPED_EMPTY_REGEXP);
+		duk_push_string(ctx, "(?:)");
 		return;
 	}
 
@@ -1100,17 +1099,6 @@ DUK_INTERNAL void duk_regexp_compile(duk_hthread *thr) {
 DUK_INTERNAL void duk_regexp_create_instance(duk_hthread *thr) {
 	duk_context *ctx = (duk_context *) thr;
 	duk_hobject *h;
-	duk_hstring *h_bc;
-	duk_small_int_t re_flags;
-
-	/* [ ... escape_source bytecode ] */
-
-	h_bc = duk_require_hstring(ctx, -1);
-	DUK_ASSERT(h_bc != NULL);
-	DUK_ASSERT(DUK_HSTRING_GET_BYTELEN(h_bc) >= 1);          /* always at least the header */
-	DUK_ASSERT(DUK_HSTRING_GET_CHARLEN(h_bc) >= 1);
-	DUK_ASSERT((duk_small_int_t) DUK_HSTRING_GET_DATA(h_bc)[0] < 0x80);  /* flags always encodes to 1 byte */
-	re_flags = (duk_small_int_t) DUK_HSTRING_GET_DATA(h_bc)[0];
 
 	/* [ ... escaped_source bytecode ] */
 
@@ -1123,25 +1111,21 @@ DUK_INTERNAL void duk_regexp_create_instance(duk_hthread *thr) {
 	DUK_HOBJECT_SET_CLASS_NUMBER(h, DUK_HOBJECT_CLASS_REGEXP);
 	DUK_HOBJECT_SET_PROTOTYPE_UPDREF(thr, h, thr->builtins[DUK_BIDX_REGEXP_PROTOTYPE]);
 
-	duk_xdef_prop_stridx(ctx, -3, DUK_STRIDX_INT_BYTECODE, DUK_PROPDESC_FLAGS_NONE);
+	duk_xdef_prop_stridx_short(ctx, -3, DUK_STRIDX_INT_BYTECODE, DUK_PROPDESC_FLAGS_NONE);
 
 	/* [ ... regexp_object escaped_source ] */
 
-	duk_xdef_prop_stridx(ctx, -2, DUK_STRIDX_SOURCE, DUK_PROPDESC_FLAGS_NONE);
+	/* In ES6 .source, and the .global, .multiline, etc flags are
+	 * inherited getters.  Store the escaped source as an internal
+	 * property for the getter.
+	 */
+
+	duk_xdef_prop_stridx_short(ctx, -2, DUK_STRIDX_INT_SOURCE, DUK_PROPDESC_FLAGS_NONE);
 
 	/* [ ... regexp_object ] */
 
-	duk_push_boolean(ctx, (re_flags & DUK_RE_FLAG_GLOBAL));
-	duk_xdef_prop_stridx(ctx, -2, DUK_STRIDX_GLOBAL, DUK_PROPDESC_FLAGS_NONE);
-
-	duk_push_boolean(ctx, (re_flags & DUK_RE_FLAG_IGNORE_CASE));
-	duk_xdef_prop_stridx(ctx, -2, DUK_STRIDX_IGNORE_CASE, DUK_PROPDESC_FLAGS_NONE);
-
-	duk_push_boolean(ctx, (re_flags & DUK_RE_FLAG_MULTILINE));
-	duk_xdef_prop_stridx(ctx, -2, DUK_STRIDX_MULTILINE, DUK_PROPDESC_FLAGS_NONE);
-
 	duk_push_int(ctx, 0);
-	duk_xdef_prop_stridx(ctx, -2, DUK_STRIDX_LAST_INDEX, DUK_PROPDESC_FLAGS_W);
+	duk_xdef_prop_stridx_short(ctx, -2, DUK_STRIDX_LAST_INDEX, DUK_PROPDESC_FLAGS_W);
 
 	/* [ ... regexp_object ] */
 }
